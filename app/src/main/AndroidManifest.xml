@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <application android:theme="@style/Theme.OrbisAI" android:label="Orbis AI" android:allowBackup="true" android:supportsRtl="true" android:description="دستیار هوشمند شخصی فارسی با دفتر کار و Voice Mode">
+    <application android:theme="@style/Theme.OrbisAI" android:label="Orbis AI" android:icon="@drawable/ic_orbis_orb" android:roundIcon="@drawable/ic_orbis_orb" android:allowBackup="true" android:supportsRtl="true" android:description="دستیار هوشمند شخصی فارسی با دفتر کار و Voice Mode">
         <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
