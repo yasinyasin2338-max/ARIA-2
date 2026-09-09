@@ -10,9 +10,13 @@ import kotlin.coroutines.resume
 /** Android TTS adapter with Persian locale, cancellation, and per-agent prosody. */
 class AndroidTtsEngine(context: Context) : AutoCloseable {
     private var ready = false
-    private val tts = TextToSpeech(context.applicationContext) { status ->
-        ready = status == TextToSpeech.SUCCESS
-        if (ready) tts.language = Locale.forLanguageTag(PersianVoiceProfile.localeTag)
+    private lateinit var tts: TextToSpeech
+
+    init {
+        tts = TextToSpeech(context.applicationContext) { status ->
+            ready = status == TextToSpeech.SUCCESS
+            if (ready) tts.language = Locale.forLanguageTag(PersianVoiceProfile.localeTag)
+        }
     }
 
     suspend fun speak(text: String, voice: PersianAgentVoice): Boolean = suspendCancellableCoroutine { cont ->
@@ -30,6 +34,6 @@ class AndroidTtsEngine(context: Context) : AutoCloseable {
         cont.invokeOnCancellation { tts.stop() }
     }
 
-    fun stop() { tts.stop() }
-    override fun close() { tts.stop(); tts.shutdown() }
+    fun stop() { if (::tts.isInitialized) tts.stop() }
+    override fun close() { if (::tts.isInitialized) { tts.stop(); tts.shutdown() } }
 }
