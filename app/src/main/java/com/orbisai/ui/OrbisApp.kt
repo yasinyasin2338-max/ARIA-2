@@ -1,6 +1,8 @@
 package com.orbisai.ui
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -21,6 +23,7 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -56,7 +59,7 @@ class OrbisViewModel(app: Application): AndroidViewModel(app) {
                     VoiceEvent.ListeningStopped -> if (_voice.value == VoiceState.LISTENING) _voice.value = VoiceState.IDLE
                     is VoiceEvent.PartialTranscript -> _partial.value = event.text
                     is VoiceEvent.FinalTranscript -> { _partial.value = ""; send(event.text, speak = _voiceMode.value) }
-                    VoiceEvent.SpeechStarted -> _voice.value = VoiceState.SPEAKING
+                    is VoiceEvent.SpeechStarted -> _voice.value = VoiceState.SPEAKING
                     VoiceEvent.SpeechFinished -> if (_voiceMode.value) startListening() else _voice.value = VoiceState.IDLE
                     is VoiceEvent.Error -> { _error.value = event.message; _voice.value = VoiceState.IDLE }
                     VoiceEvent.ThinkingStarted -> _voice.value = VoiceState.THINKING
@@ -64,19 +67,14 @@ class OrbisViewModel(app: Application): AndroidViewModel(app) {
             }
         }
     }
-
     fun select(a: Agent) { _agent.value = a }
-
     fun toggleVoice() {
         if (_voiceMode.value) { _voiceMode.value = false; viewModelScope.launch { voiceEngine.cancel() } }
         else { _error.value = null; _voiceMode.value = true; startListening() }
     }
-
     fun startListening() { viewModelScope.launch { voiceEngine.startListening() } }
-
     fun send(raw:String, speak:Boolean = _voiceMode.value) {
-        val text = PersianVoiceProfile.normalize(raw)
-        if (text.isBlank()) return
+        val text = PersianVoiceProfile.normalize(raw); if (text.isBlank()) return
         val a = _agent.value
         _messages.value = _messages.value + Message(System.nanoTime(), a.id, text, true)
         viewModelScope.launch {
@@ -86,7 +84,6 @@ class OrbisViewModel(app: Application): AndroidViewModel(app) {
             if (speak) voiceEngine.speak(r.text) else _voice.value = VoiceState.IDLE
         }
     }
-
     override fun onCleared() { voiceEngine.release(); super.onCleared() }
 }
 
@@ -94,67 +91,36 @@ class OrbisViewModel(app: Application): AndroidViewModel(app) {
 fun OrbisApp(onRequestMicrophone:()->Unit = {}, vm:OrbisViewModel = viewModel()) {
     val agent by vm.agent.collectAsState(); val messages by vm.messages.collectAsState(); val voice by vm.voice.collectAsState()
     val partial by vm.partial.collectAsState(); val voiceMode by vm.voiceMode.collectAsState(); val error by vm.error.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
     var input by remember { mutableStateOf("") }
     val pulse by rememberInfiniteTransition(label="pulse").animateFloat(1f,1.07f,infiniteRepeatable(tween(1200,easing=FastOutSlowInEasing),RepeatMode.Reverse),label="pulse")
+    fun voiceAction() { if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) vm.toggleVoice() else onRequestMicrophone() }
 
     MaterialTheme(colorScheme = lightColorScheme(background=Color(0xFFF3F5F8), surface=Color.White, primary=Color(0xFF1D2638))) {
         Box(Modifier.fillMaxSize()) {
             OfficeBackdrop()
             Column(Modifier.fillMaxSize().padding(horizontal=18.dp, vertical=14.dp)) {
-                Header(voiceMode)
-                Spacer(Modifier.height(12.dp))
-                AgentRow(agent, vm)
-                Spacer(Modifier.height(14.dp))
-                VoiceStage(voice, voiceMode, partial, pulse) { vm.toggleVoice() }
-                Spacer(Modifier.height(10.dp))
+                Header(voiceMode); Spacer(Modifier.height(12.dp)); AgentRow(agent, vm); Spacer(Modifier.height(14.dp))
+                VoiceStage(voice, voiceMode, partial, pulse) { voiceAction() }
+                Spacer(Modifier.height(8.dp))
                 if (error != null) Text(error!!, color=Color(0xFFB42318), style=MaterialTheme.typography.bodySmall, modifier=Modifier.fillMaxWidth(), textAlign=TextAlign.Center)
                 Chat(messages, Modifier.weight(1f))
-                Composer(input, {input=it}, { vm.send(input); input="" }, { vm.toggleVoice() }, voiceMode)
+                Composer(input, {input=it}, { vm.send(input); input="" }, { voiceAction() }, voiceMode)
             }
         }
     }
 }
 
-@Composable private fun OfficeBackdrop() {
-    Canvas(Modifier.fillMaxSize().alpha(.9f)) {
-        drawRect(Brush.verticalGradient(listOf(Color(0xFFF9FAFC),Color(0xFFE8ECF2))))
-        drawRect(Color(0x14000000), topLeft=Offset(0f,size.height*.74f), size=androidx.compose.ui.geometry.Size(size.width,size.height*.26f))
-        drawCircle(Color(0x12000000), size.minDimension*.32f, Offset(size.width*.82f,size.height*.16f))
-        drawLine(Color(0x18000000), Offset(0f,size.height*.74f), Offset(size.width,size.height*.74f), 2f)
-    }
-}
+@Composable private fun OfficeBackdrop() { Canvas(Modifier.fillMaxSize().alpha(.92f)) { drawRect(Brush.verticalGradient(listOf(Color(0xFFF9FAFC),Color(0xFFE8ECF2)))); drawRect(Color(0x14000000),topLeft=Offset(0f,size.height*.74f),size=androidx.compose.ui.geometry.Size(size.width,size.height*.26f)); drawCircle(Color(0x12000000),size.minDimension*.32f,Offset(size.width*.82f,size.height*.16f)); drawLine(Color(0x18000000),Offset(0f,size.height*.74f),Offset(size.width,size.height*.74f),2f) } }
 
-@Composable private fun Header(voiceMode:Boolean) {
-    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-        Box(Modifier.size(46.dp).background(Color.White,CircleShape),contentAlignment=Alignment.Center) { OrbMark(Modifier.size(30.dp)) }
-        Spacer(Modifier.width(11.dp)); Column(Modifier.weight(1f)) { Text("ORBIS AI",fontWeight=FontWeight.Black,color=Ink); Text("دفتر هوشمند شخصی شما",style=MaterialTheme.typography.labelSmall,color=Muted) }
-        Surface(shape=RoundedCornerShape(50),color=if(voiceMode) Color(0xFFE8F7EF) else Color.White) { Text(if(voiceMode) "●  Voice فعال" else "●  آماده",Modifier.padding(horizontal=12.dp,vertical=7.dp),style=MaterialTheme.typography.labelSmall,fontWeight=FontWeight.Bold,color=if(voiceMode) Color(0xFF087443) else Muted) }
-    }
-}
+@Composable private fun Header(voiceMode:Boolean) { Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) { Box(Modifier.size(46.dp).background(Color.White,CircleShape),contentAlignment=Alignment.Center){OrbMark(Modifier.size(30.dp))}; Spacer(Modifier.width(11.dp)); Column(Modifier.weight(1f)){Text("ORBIS AI",fontWeight=FontWeight.Black,color=Ink);Text("دفتر هوشمند شخصی شما",style=MaterialTheme.typography.labelSmall,color=Muted)}; Surface(shape=RoundedCornerShape(50),color=if(voiceMode) Color(0xFFE8F7EF) else Color.White){Text(if(voiceMode)"●  Voice فعال" else "●  آماده",Modifier.padding(horizontal=12.dp,vertical=7.dp),style=MaterialTheme.typography.labelSmall,fontWeight=FontWeight.Bold,color=if(voiceMode)Color(0xFF087443)else Muted)} } }
 
-@Composable private fun AgentRow(selected:Agent, vm:OrbisViewModel) {
-    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) { Agents.all.forEach { a ->
-        val active=a.id==selected.id
-        Surface(Modifier.weight(1f).clickable{vm.select(a)},shape=RoundedCornerShape(18.dp),color=if(active) Color(0xFF202A3D) else Glass,shadowElevation=if(active) 5.dp else 1.dp) {
-            Column(Modifier.padding(10.dp),horizontalAlignment=Alignment.CenterHorizontally) { Text(a.emoji,style=MaterialTheme.typography.titleMedium); Text(a.name,fontWeight=FontWeight.Bold,color=if(active) Color.White else Ink); Text(a.role,style=MaterialTheme.typography.labelSmall,color=if(active) Color(0xFFD5DBE5) else Muted,maxLines=1) }
-        }
-    }}
-}
+@Composable private fun AgentRow(selected:Agent,vm:OrbisViewModel){Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){Agents.all.forEach{a->val active=a.id==selected.id;Surface(Modifier.weight(1f).clickable{vm.select(a)},shape=RoundedCornerShape(18.dp),color=if(active)Color(0xFF202A3D)else Glass,shadowElevation=if(active)5.dp else 1.dp){Column(Modifier.padding(10.dp),horizontalAlignment=Alignment.CenterHorizontally){Text(a.emoji,style=MaterialTheme.typography.titleMedium);Text(a.name,fontWeight=FontWeight.Bold,color=if(active)Color.White else Ink);Text(a.role,style=MaterialTheme.typography.labelSmall,color=if(active)Color(0xFFD5DBE5)else Muted,maxLines=1)}}}}}
 
-@Composable private fun VoiceStage(state:VoiceState, active:Boolean, partial:String, pulse:Float, onTap:()->Unit) {
-    Column(Modifier.fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally) {
-        Box(Modifier.height(205.dp).fillMaxWidth(),contentAlignment=Alignment.Center) {
-            if(active) Box(Modifier.size(174.dp).scale(if(state==VoiceState.LISTENING)pulse else 1f).background(Color(0x151D2638),CircleShape))
-            Box(Modifier.size(138.dp).scale(if(state==VoiceState.LISTENING)pulse else 1f).background(Brush.radialGradient(listOf(Color.White,Color(0xFFE8EDF4),Color(0xFFB9C3D1))),CircleShape).clickable{onTap()},contentAlignment=Alignment.Center) { OrbMark(Modifier.size(72.dp)) }
-        }
-        Text(when(state){VoiceState.IDLE->if(active)"برای صحبت لمس کنید" else "آماده‌ام";VoiceState.LISTENING->"دارم گوش می‌دهم…";VoiceState.THINKING->"در حال فکر کردن…";VoiceState.SPEAKING->"دارم پاسخ می‌دهم…"},fontWeight=FontWeight.Bold,color=Ink)
-        if(partial.isNotBlank()) Text(partial,Modifier.padding(top=4.dp).fillMaxWidth(),textAlign=TextAlign.Center,color=Muted,maxLines=2)
-        Text(if(active)"گفت‌وگوی طبیعی • قطع صحبت با لمس گوی" else "Voice Mode را برای مکالمهٔ صوتی فعال کنید",style=MaterialTheme.typography.labelSmall,color=Muted)
-    }
-}
+@Composable private fun VoiceStage(state:VoiceState,active:Boolean,partial:String,pulse:Float,onTap:()->Unit){Column(Modifier.fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally){Box(Modifier.height(205.dp).fillMaxWidth(),contentAlignment=Alignment.Center){if(active)Box(Modifier.size(174.dp).scale(if(state==VoiceState.LISTENING)pulse else 1f).background(Color(0x151D2638),CircleShape));Box(Modifier.size(138.dp).scale(if(state==VoiceState.LISTENING)pulse else 1f).background(Brush.radialGradient(listOf(Color.White,Color(0xFFE8EDF4),Color(0xFFB9C3D1))),CircleShape).clickable{onTap()},contentAlignment=Alignment.Center){OrbMark(Modifier.size(72.dp))}};Text(when(state){VoiceState.IDLE->if(active)"برای شروع صحبت لمس کنید" else "آماده‌ام";VoiceState.LISTENING->"دارم گوش می‌دهم…";VoiceState.THINKING->"در حال فکر کردن…";VoiceState.SPEAKING->"دارم پاسخ می‌دهم…"},fontWeight=FontWeight.Bold,color=Ink);if(partial.isNotBlank())Text(partial,Modifier.padding(top=4.dp).fillMaxWidth(),textAlign=TextAlign.Center,color=Muted,maxLines=2);Text(if(active)"مکالمهٔ پیوسته • پاسخ صوتی • آمادهٔ قطع و ادامه" else "Voice Mode را برای مکالمهٔ صوتی فارسی فعال کنید",style=MaterialTheme.typography.labelSmall,color=Muted)} }
 
-@Composable private fun OrbMark(modifier:Modifier) { Canvas(modifier) { val c=Offset(size.width/2,size.height/2); drawCircle(Color.White,size.minDimension*.42f,c); drawCircle(Color(0xFFB9C3D1),size.minDimension*.42f,c,style=androidx.compose.ui.graphics.drawscope.Stroke(size.minDimension*.07f)); drawCircle(Color(0xFF667085),size.minDimension*.10f,c) } }
+@Composable private fun OrbMark(modifier:Modifier){Canvas(modifier){val c=Offset(size.width/2,size.height/2);drawCircle(Color.White,size.minDimension*.42f,c);drawCircle(Color(0xFFB9C3D1),size.minDimension*.42f,c,style=androidx.compose.ui.graphics.drawscope.Stroke(size.minDimension*.07f));drawCircle(Color(0xFF667085),size.minDimension*.10f,c)}}
 
-@Composable private fun Chat(messages:List<Message>, modifier:Modifier) { LazyColumn(modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(7.dp),contentPadding=PaddingValues(vertical=6.dp)) { items(messages,key={it.id}) { m -> Surface(shape=RoundedCornerShape(17.dp),color=if(m.user) Color(0xFFE9EEF5) else Glass,shadowElevation=1.dp,modifier=Modifier.fillMaxWidth()) { Column(Modifier.padding(11.dp)) { Text(if(m.user)"شما" else Agents.all.firstOrNull{it.id==m.agentId}?.name ?: "Orbis",fontWeight=FontWeight.Bold,color=Ink,style=MaterialTheme.typography.labelSmall); Text(m.text,color=Ink,modifier=Modifier.padding(top=3.dp)) } } } } }
+@Composable private fun Chat(messages:List<Message>,modifier:Modifier){LazyColumn(modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(7.dp),contentPadding=PaddingValues(vertical=6.dp)){items(messages,key={it.id}){m->Surface(shape=RoundedCornerShape(17.dp),color=if(m.user)Color(0xFFE9EEF5)else Glass,shadowElevation=1.dp,modifier=Modifier.fillMaxWidth()){Column(Modifier.padding(11.dp)){Text(if(m.user)"شما" else Agents.all.firstOrNull{it.id==m.agentId}?.name?:"Orbis",fontWeight=FontWeight.Bold,color=Ink,style=MaterialTheme.typography.labelSmall);Text(m.text,color=Ink,modifier=Modifier.padding(top=3.dp))}}}}}
 
-@Composable private fun Composer(value:String,onValue:(String)->Unit,onSend:()->Unit,onVoice:()->Unit,voice:Boolean) { Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) { OutlinedTextField(value,onValue,Modifier.weight(1f),placeholder={Text("پیامت را بنویس…")},singleLine=true,shape=RoundedCornerShape(20.dp)); Spacer(Modifier.width(7.dp)); FilledIconButton(onClick=onVoice,modifier=Modifier.size(52.dp),shape=CircleShape) { Text(if(voice)"■" else "🎙",style=MaterialTheme.typography.titleMedium) }; Spacer(Modifier.width(5.dp)); Button(onClick=onSend,shape=RoundedCornerShape(18.dp),enabled=value.isNotBlank()) { Text("ارسال") } } }
+@Composable private fun Composer(value:String,onValue:(String)->Unit,onSend:()->Unit,onVoice:()->Unit,voice:Boolean){Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){OutlinedTextField(value,onValue,Modifier.weight(1f),placeholder={Text("پیامت را بنویس…")},singleLine=true,shape=RoundedCornerShape(20.dp));Spacer(Modifier.width(7.dp));FilledIconButton(onClick=onVoice,modifier=Modifier.size(52.dp),shape=CircleShape){Text(if(voice)"■" else "🎙",style=MaterialTheme.typography.titleMedium)};Spacer(Modifier.width(5.dp));Button(onClick=onSend,shape=RoundedCornerShape(18.dp),enabled=value.isNotBlank()){Text("ارسال")}}}
