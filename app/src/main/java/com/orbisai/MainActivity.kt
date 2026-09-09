@@ -10,9 +10,7 @@ import androidx.core.content.ContextCompat
 import com.orbisai.ui.OrbisApp
 
 class MainActivity : ComponentActivity() {
-    private val micRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) setContent { OrbisApp() }
-    }
+    private val micRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
