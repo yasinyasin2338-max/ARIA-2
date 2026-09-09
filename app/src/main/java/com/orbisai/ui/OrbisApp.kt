@@ -21,7 +21,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
@@ -107,10 +109,8 @@ fun OrbisApp(onRequestMicrophone:()->Unit={},vm:OrbisViewModel=viewModel()){
             Column(Modifier.fillMaxSize().padding(horizontal=16.dp,vertical=10.dp)){
                 TopBar(active)
                 Spacer(Modifier.height(10.dp))
-                ExecutiveBar(agent,showAgents,{showAgents=!showAgents},vm)
-                AnimatedVisibility(showAgents,enter=fadeIn()+expandVertically(),exit=fadeOut()+shrinkVertically()){
-                    AgentSelector(agent,vm)
-                }
+                ExecutiveBar(agent,showAgents,{showAgents=!showAgents})
+                AnimatedVisibility(showAgents,enter=fadeIn()+expandVertically(),exit=fadeOut()+shrinkVertically()){ AgentSelector(agent,vm) }
                 Spacer(Modifier.height(6.dp))
                 VoiceConsole(state,active,partial,pulse.value,::voice)
                 if(error!=null) ErrorPill(error.orEmpty())
@@ -134,7 +134,7 @@ fun OrbisApp(onRequestMicrophone:()->Unit={},vm:OrbisViewModel=viewModel()){
     }
 }
 
-@Composable private fun ExecutiveBar(agent:Agent,expanded:Boolean,onExpand:()->Unit,vm:OrbisViewModel){
+@Composable private fun ExecutiveBar(agent:Agent,expanded:Boolean,onExpand:()->Unit){
     Surface(Modifier.fillMaxWidth().clickable{onExpand()},shape=RoundedCornerShape(22.dp),color=White.copy(alpha=.96f),shadowElevation=3.dp){
         Row(Modifier.padding(10.dp),verticalAlignment=Alignment.CenterVertically){
             Box(Modifier.size(40.dp).background(Navy,CircleShape),contentAlignment=Alignment.Center){Text(agent.emoji,fontSize=19.sp)}
@@ -171,7 +171,7 @@ fun OrbisApp(onRequestMicrophone:()->Unit={},vm:OrbisViewModel=viewModel()){
 
 @Composable private fun AudioBars(modifier:Modifier){
     val t=rememberInfiniteTransition(label="bars");val a=t.animateFloat(0.25f,1f,infiniteRepeatable(tween(500),RepeatMode.Reverse),label="a").value
-    Row(modifier,height=20.dp,horizontalArrangement=Arrangement.spacedBy(3.dp),verticalAlignment=Alignment.CenterVertically){repeat(9){i->Box(Modifier.width(3.dp).height((6+18*((i%4+1)/4f)*a)).dp).background(if(i%2==0)Cyan else Violet,RoundedCornerShape(3.dp))}}
+    Row(modifier.height(20.dp),horizontalArrangement=Arrangement.spacedBy(3.dp),verticalAlignment=Alignment.CenterVertically){repeat(9){i->Box(Modifier.width(3.dp).height((6f+18f*((i%4+1)/4f)*a).dp).background(if(i%2==0)Cyan else Violet,RoundedCornerShape(3.dp)))}}
 }
 
 @Composable private fun Welcome(agent:Agent,modifier:Modifier){
@@ -194,12 +194,14 @@ fun OrbisApp(onRequestMicrophone:()->Unit={},vm:OrbisViewModel=viewModel()){
 @Composable private fun ErrorPill(text:String){Surface(Modifier.fillMaxWidth().padding(top=5.dp),shape=RoundedCornerShape(12.dp),color=Color(0xFFFFEAEA)){Text(text,Modifier.padding(7.dp),color=Color(0xFFB42318),fontSize=9.sp,textAlign=TextAlign.Center)}}
 
 @Composable private fun OfficeScene(){
-    Canvas(Modifier.fillMaxSize()){drawRect(Brush.verticalGradient(listOf(Color(0xFFFDFEFE),Color(0xFFE7EBF0))));val w=size.width;val h=size.height;val floor=h*.72f
-        drawRect(Color(0xFFE1E5EA),Offset(0f,floor),androidx.compose.ui.geometry.Size(w,h-floor));drawLine(Color(0xFFCDD3DB),Offset(0f,floor),Offset(w,floor),3f)
+    Canvas(Modifier.fillMaxSize()){
+        drawRect(Brush.verticalGradient(listOf(Color(0xFFFDFEFE),Color(0xFFE7EBF0))))
+        val w=size.width;val h=size.height;val floor=h*.72f
+        drawRect(Color(0xFFE1E5EA),Offset(0f,floor),Size(w,h-floor));drawLine(Color(0xFFCDD3DB),Offset(0f,floor),Offset(w,floor),3f)
         for(i in 1..5){val x=w*i/6f;drawLine(Color(0x12FFFFFF),Offset(x,floor),Offset(w/2+(x-w/2)*1.22f,h),3f)}
-        drawRoundRect(Color(0x18FFFFFF),Offset(w*.08f,h*.12f),androidx.compose.ui.geometry.Size(w*.26f,h*.24f),18f,18f)
-        drawRoundRect(Color(0x16FFFFFF),Offset(w*.67f,h*.12f),androidx.compose.ui.geometry.Size(w*.24f,h*.24f),18f,18f)
-        drawRect(Color(0x0E7158FF),Offset(w*.34f,h*.11f),androidx.compose.ui.geometry.Size(w*.30f,h*.26f))
+        drawRoundRect(Color(0x18FFFFFF),Offset(w*.08f,h*.12f),Size(w*.26f,h*.24f),CornerRadius(18f,18f))
+        drawRoundRect(Color(0x16FFFFFF),Offset(w*.67f,h*.12f),Size(w*.24f,h*.24f),CornerRadius(18f,18f))
+        drawRect(Color(0x0E7158FF),Offset(w*.34f,h*.11f),Size(w*.30f,h*.26f))
         drawCircle(Color(0x0C24C7BD),w*.22f,Offset(w*.84f,h*.78f));drawCircle(Color(0x087158FF),w*.16f,Offset(w*.10f,h*.76f))
     }
 }
