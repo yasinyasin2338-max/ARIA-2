@@ -15,7 +15,6 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
@@ -29,35 +28,37 @@ jobs:
       - name: Verify APK archive
         run: unzip -t app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Install emulator image
+      - name: Enable KVM
         run: |
-          yes | sdkmanager "emulator" "system-images;android-35;google_apis;x86_64"
-          echo no | avdmanager create avd -n orbis-ci -k "system-images;android-35;google_apis;x86_64" --force
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
 
-      - name: Boot emulator
-        run: |
-          $ANDROID_HOME/emulator/emulator -avd orbis-ci -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot > /tmp/emulator.log 2>&1 &
-          adb wait-for-device
-          timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 3; done'
-          adb shell input keyevent 82 || true
-
-      - name: Install and launch smoke test
-        run: |
-          adb install -r app/build/outputs/apk/debug/app-debug.apk
-          adb logcat -c
-          adb shell am force-stop ai.orbis.office
-          adb shell am start -W ai.orbis.office/.MainActivity | tee /tmp/am-start.txt
-          sleep 8
-          adb shell pidof ai.orbis.office | tee /tmp/pid.txt
-          test -s /tmp/pid.txt
-          adb shell uiautomator dump /sdcard/orbis.xml || true
-          adb pull /sdcard/orbis.xml /tmp/orbis.xml || true
-          adb logcat -d > /tmp/logcat.txt
-          if grep -E "FATAL EXCEPTION|Process: ai\.orbis\.office.*has died" /tmp/logcat.txt; then
-            echo "Runtime crash detected"
-            exit 1
-          fi
-          grep -q "Orbis AI" /tmp/orbis.xml || (echo "Orbis UI marker not found" && cat /tmp/orbis.xml && exit 1)
+      - name: Install, launch and runtime smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot-save
+          script: |
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb logcat -c
+            adb shell am force-stop ai.orbis.office
+            adb shell am start -W ai.orbis.office/.MainActivity | tee /tmp/am-start.txt
+            sleep 10
+            adb shell pidof ai.orbis.office | tee /tmp/pid.txt
+            test -s /tmp/pid.txt
+            adb shell uiautomator dump /sdcard/orbis.xml || true
+            adb pull /sdcard/orbis.xml /tmp/orbis.xml || true
+            adb logcat -d > /tmp/logcat.txt
+            if grep -E "FATAL EXCEPTION|Process: ai\.orbis\.office.*has died" /tmp/logcat.txt; then
+              echo "Runtime crash detected"
+              exit 1
+            fi
+            grep -q "Orbis AI" /tmp/orbis.xml || (echo "Orbis UI marker not found" && cat /tmp/orbis.xml && exit 1)
 
       - name: Package diagnostics
         if: always()
@@ -66,7 +67,6 @@ jobs:
           cp /tmp/am-start.txt diagnostics/ 2>/dev/null || true
           cp /tmp/logcat.txt diagnostics/ 2>/dev/null || true
           cp /tmp/orbis.xml diagnostics/ 2>/dev/null || true
-          cp /tmp/emulator.log diagnostics/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         if: success()
