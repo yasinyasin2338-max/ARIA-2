@@ -72,7 +72,7 @@ class VoiceController(private val context: Context) : RecognitionListener, TextT
     var onErrorText: (String) -> Unit = {}
     init { recognizer?.setRecognitionListener(this) }
     fun listen() {
-        if (recognizer == null) { onErrorText("تشخیص گفتار روی این دستگاه در دسترس نیست."); return }
+        val r = recognizer ?: run { onErrorText("تشخیص گفتار روی این دستگاه در دسترس نیست."); return }
         tts.stop(); onState("در حال شنیدن")
         val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -80,7 +80,7 @@ class VoiceController(private val context: Context) : RecognitionListener, TextT
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
-        runCatching { recognizer.startListening(i) }.onFailure { onErrorText("شروع Voice ناموفق بود.") }
+        runCatching { r.startListening(i) }.onFailure { onErrorText("شروع Voice ناموفق بود.") }
     }
     fun stop() { recognizer?.stopListening(); onState("آماده") }
     fun speak(text: String, agent: Agent) {
