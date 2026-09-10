@@ -5,7 +5,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 
 /** Small compatibility helpers kept local to Orbis' native UI. */
-var EditText.singleLineCompat: Boolean
+var EditText.singleLine: Boolean
     get() = maxLines == 1
     set(value) { setSingleLine(value) }
 
