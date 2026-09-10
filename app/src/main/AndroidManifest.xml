@@ -2,7 +2,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <queries>
-        <intent><action android:name="android.speech.RecognitionService" /></intent>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
     </queries>
     <application
         android:allowBackup="false"
@@ -12,7 +17,10 @@
         android:label="Orbis AI"
         android:icon="@drawable/ic_orbis"
         android:roundIcon="@drawable/ic_orbis">
-        <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
