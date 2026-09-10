@@ -51,14 +51,11 @@ jobs:
             sleep 10
             adb shell pidof ai.orbis.office | tee /tmp/pid.txt
             test -s /tmp/pid.txt
-            adb shell uiautomator dump /sdcard/orbis.xml || true
-            adb pull /sdcard/orbis.xml /tmp/orbis.xml || true
+            adb shell uiautomator dump /sdcard/orbis.xml
+            adb pull /sdcard/orbis.xml /tmp/orbis.xml
             adb logcat -d > /tmp/logcat.txt
-            if grep -E "FATAL EXCEPTION|Process: ai\.orbis\.office.*has died" /tmp/logcat.txt; then
-              echo "Runtime crash detected"
-              exit 1
-            fi
-            grep -q "Orbis AI" /tmp/orbis.xml || (echo "Orbis UI marker not found" && cat /tmp/orbis.xml && exit 1)
+            ! grep -E "FATAL EXCEPTION|Process: ai\.orbis\.office.*has died" /tmp/logcat.txt
+            grep -q "Orbis AI" /tmp/orbis.xml
 
       - name: Package diagnostics
         if: always()
