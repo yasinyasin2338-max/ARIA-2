@@ -1,7 +1,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <application android:theme="@style/Theme.OrbisAI" android:label="Orbis AI" android:icon="@drawable/ic_orbis_orb" android:roundIcon="@drawable/ic_orbis_orb" android:allowBackup="true" android:supportsRtl="true" android:description="@string/app_description">
+    <queries>
+        <intent><action android:name="android.speech.RecognitionService" /></intent>
+    </queries>
+    <application
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.OrbisOffice"
+        android:label="Orbis AI"
+        android:icon="@drawable/ic_orbis"
+        android:roundIcon="@drawable/ic_orbis">
         <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
