@@ -63,35 +63,66 @@ class OpenAiCompatibleClient {
 }
 
 class VoiceController(private val context: Context) : RecognitionListener, TextToSpeech.OnInitListener {
-    private val recognizer = if (SpeechRecognizer.isRecognitionAvailable(context)) SpeechRecognizer.createSpeechRecognizer(context) else null
-    private val tts = TextToSpeech(context, this)
+    private val recognizer = runCatching {
+        if (SpeechRecognizer.isRecognitionAvailable(context)) SpeechRecognizer.createSpeechRecognizer(context) else null
+    }.getOrNull()
+    private var tts: TextToSpeech? = null
     private var ready = false
     var onPartial: (String) -> Unit = {}
     var onFinal: (String) -> Unit = {}
     var onState: (String) -> Unit = {}
     var onErrorText: (String) -> Unit = {}
-    init { recognizer?.setRecognitionListener(this) }
+
+    init {
+        runCatching { recognizer?.setRecognitionListener(this) }
+        // Some Samsung TTS engines can invoke onInit very quickly. Keep the field nullable
+        // so a synchronous callback cannot dereference an unassigned property.
+        tts = runCatching { TextToSpeech(context.applicationContext, this) }.getOrNull()
+    }
+
     fun listen() {
         val r = recognizer ?: run { onErrorText("تشخیص گفتار روی این دستگاه در دسترس نیست."); return }
-        tts.stop(); onState("در حال شنیدن")
+        tts?.stop()
+        onState("در حال شنیدن")
         val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
-        runCatching { r.startListening(i) }.onFailure { onErrorText("شروع Voice ناموفق بود.") }
+        runCatching { r.startListening(i) }.onFailure {
+            onState("آماده")
+            onErrorText("شروع Voice ناموفق بود.")
+        }
     }
-    fun stop() { recognizer?.stopListening(); onState("آماده") }
+
+    fun stop() {
+        runCatching { recognizer?.stopListening() }
+        onState("آماده")
+    }
+
     fun speak(text: String, agent: Agent) {
-        if (!ready) { onErrorText("صدای فارسی دستگاه آماده نیست."); return }
-        recognizer?.cancel(); onState("در حال صحبت")
-        tts.language = Locale.forLanguageTag("fa-IR")
-        tts.setPitch(agent.pitch); tts.setSpeechRate(agent.rate)
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "orbis-${System.nanoTime()}")
+        val engine = tts
+        if (!ready || engine == null) { onErrorText("صدای فارسی دستگاه آماده نیست."); return }
+        runCatching { recognizer?.cancel() }
+        onState("در حال صحبت")
+        engine.language = Locale.forLanguageTag("fa-IR")
+        engine.setPitch(agent.pitch)
+        engine.setSpeechRate(agent.rate)
+        engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "orbis-${System.nanoTime()}")
     }
-    fun close() { recognizer?.destroy(); tts.stop(); tts.shutdown() }
-    override fun onInit(status: Int) { ready = status == TextToSpeech.SUCCESS; if (ready) tts.language = Locale.forLanguageTag("fa-IR") }
+
+    fun close() {
+        runCatching { recognizer?.destroy() }
+        runCatching { tts?.stop() }
+        runCatching { tts?.shutdown() }
+        tts = null
+    }
+
+    override fun onInit(status: Int) {
+        ready = status == TextToSpeech.SUCCESS
+        if (ready) runCatching { tts?.language = Locale.forLanguageTag("fa-IR") }
+    }
     override fun onReadyForSpeech(params: Bundle?) { onState("در حال شنیدن") }
     override fun onBeginningOfSpeech() = Unit
     override fun onRmsChanged(rmsdB: Float) = Unit
@@ -103,4 +134,6 @@ class VoiceController(private val context: Context) : RecognitionListener, TextT
     override fun onEvent(eventType: Int, params: Bundle?) = Unit
 }
 
-fun openUrl(context: Context, url: String) { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
+fun openUrl(context: Context, url: String) {
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+}
