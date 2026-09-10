@@ -48,14 +48,24 @@ fun OrbisOfficeApp() {
     var model by remember { mutableStateOf(context.getSharedPreferences("orbis", Context.MODE_PRIVATE).getString("model", "gpt-4o-mini") ?: "") }
     var apiKey by remember { mutableStateOf("") }
     val client = remember { OpenAiCompatibleClient() }
-    val voice = remember { VoiceController(context) }
+    var voice by remember { mutableStateOf<VoiceController?>(null) }
 
     DisposableEffect(Unit) {
-        voice.onPartial = { input = it }
-        voice.onFinal = { text -> input = text }
-        voice.onState = { state = it }
-        voice.onErrorText = { msg -> messages = messages + ("assistant" to msg) }
-        onDispose { voice.close() }
+        onDispose { voice?.close() }
+    }
+
+    fun ensureVoice(): VoiceController? {
+        voice?.let { return it }
+        return runCatching { VoiceController(context) }.onSuccess { v ->
+            v.onPartial = { input = it }
+            v.onFinal = { text -> input = text }
+            v.onState = { state = it }
+            v.onErrorText = { msg -> messages = messages + ("assistant" to msg) }
+            voice = v
+        }.onFailure {
+            state = "آماده"
+            messages = messages + ("assistant" to "Voice روی این دستگاه آماده نشد. دوباره تلاش کن یا از تایپ استفاده کن.")
+        }.getOrNull()
     }
 
     fun send(text: String) {
@@ -75,7 +85,7 @@ fun OrbisOfficeApp() {
                 OfficeHero(selected, onSelect = { selected = it })
                 AgentStrip(selected, onSelect = { selected = it })
                 Conversation(messages, selected, Modifier.weight(1f))
-                Composer(input, onInput = { input = it }, onSend = { send(input) }, onVoice = { voice.listen() }, onTools = { showTools = true })
+                Composer(input, onInput = { input = it }, onSend = { send(input) }, onVoice = { ensureVoice()?.listen() }, onTools = { showTools = true })
             }
         }
     }
