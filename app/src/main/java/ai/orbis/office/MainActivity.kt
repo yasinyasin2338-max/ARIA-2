@@ -13,6 +13,7 @@ import android.speech.RecognizerIntent
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.*
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -59,7 +60,7 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = Color.rgb(9,12,18)
         val scroll = ScrollView(this).apply { setBackgroundColor(Color.rgb(9,12,18)); isFillViewport = true }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(12)); layoutDirection = View.LAYOUT_DIRECTION_RTL }
-        scroll.addView(root, ScrollView.LayoutParams(-1, -1)); setContentView(scroll)
+        scroll.addView(root, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)); setContentView(scroll)
 
         val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val logo = TextView(this).apply { text = "● ● ●"; textSize = 18f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; background = round(Color.BLACK,14); setPadding(dp(10),dp(8),dp(10),dp(8)) }
