@@ -3,8 +3,10 @@ package com.orbisai
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -56,6 +58,7 @@ class MainActivity : ComponentActivity() {
     private var shizukuRunning by mutableStateOf(false)
     private var shizukuGranted by mutableStateOf(false)
     private var shizukuUid by mutableStateOf<Int?>(null)
+    private var restoredServices = false
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         refreshShizukuStatus()
@@ -135,6 +138,9 @@ class MainActivity : ComponentActivity() {
                             TextButton(onClick = { stopRemoteBridge() }) {
                                 Text("خاموش کردن اتصال مستقیم")
                             }
+                            Button(onClick = { requestUnrestrictedBattery() }) {
+                                Text("پایدار کردن اتصال در پس‌زمینه")
+                            }
 
                             Button(onClick = { startAlwaysOnVoice() }) {
                                 Text("فعال کردن «آریس» همیشه‌شنوا")
@@ -166,7 +172,7 @@ class MainActivity : ComponentActivity() {
                                 Text("Notification Access")
                             }
 
-                            Text("اتصال مستقیم فقط وقتی این گزینه را خودت روشن کنی فعال می‌شود. فرمان‌های راه دور فعلاً محدود به Home، Back، Recents و Notifications هستند؛ هیچ Shell، رمز، محتوای صفحه یا داده بانکی از راه دور خوانده نمی‌شود.")
+                            Text("اتصال مستقیم فقط وقتی خودت آن را روشن کنی فعال می‌ماند. کنترل مجاز شامل Home، Back، Recents، Notifications، Tap، Swipe، Scroll، بازکردن برنامه، تایپ و خواندن عناصر قابل‌دسترسیِ غیررمزی است. رمزها، Secure Folder و داده‌های بانکی خوانده نمی‌شوند.")
                         }
                     },
                     confirmButton = {
@@ -182,6 +188,10 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         refreshShizukuStatus()
+        if (!restoredServices) {
+            restoredServices = true
+            restoreEnabledServices()
+        }
     }
 
     override fun onDestroy() {
@@ -189,6 +199,23 @@ class MainActivity : ComponentActivity() {
         Shizuku.removeBinderDeadListener(binderDeadListener)
         Shizuku.removeRequestPermissionResultListener(permissionResultListener)
         super.onDestroy()
+    }
+
+    private fun restoreEnabledServices() {
+        val store = BridgePairingStore(this)
+        if (store.bridgeEnabled) {
+            runCatching {
+                ContextCompat.startForegroundService(this, Intent(this, BridgeCommandService::class.java))
+            }
+        }
+        if (
+            store.voiceEnabled &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        ) {
+            runCatching {
+                ContextCompat.startForegroundService(this, Intent(this, ArisAlwaysOnVoiceService::class.java))
+            }
+        }
     }
 
     private fun refreshShizukuStatus() {
@@ -240,13 +267,29 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startRemoteBridgeNow() {
+        BridgePairingStore(this).bridgeEnabled = true
         ContextCompat.startForegroundService(this, Intent(this, BridgeCommandService::class.java))
         Toast.makeText(this, "اتصال مستقیم ARIA روشن شد", Toast.LENGTH_SHORT).show()
     }
 
     private fun stopRemoteBridge() {
+        BridgePairingStore(this).bridgeEnabled = false
         stopService(Intent(this, BridgeCommandService::class.java))
         Toast.makeText(this, "اتصال مستقیم ARIA خاموش شد", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun requestUnrestrictedBattery() {
+        val power = getSystemService(PowerManager::class.java)
+        if (power.isIgnoringBatteryOptimizations(packageName)) {
+            Toast.makeText(this, "محدودیت باتری برای ARIA برداشته شده", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val intent = Intent(
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse("package:$packageName")
+        )
+        runCatching { startActivity(intent) }
+            .onFailure { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
     }
 
     private fun startAlwaysOnVoice() {
@@ -266,11 +309,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startAlwaysOnVoiceNow() {
+        BridgePairingStore(this).voiceEnabled = true
         ContextCompat.startForegroundService(this, Intent(this, ArisAlwaysOnVoiceService::class.java))
         Toast.makeText(this, "Voice همیشه‌فعال آریس روشن شد؛ بگو «آریس»", Toast.LENGTH_LONG).show()
     }
 
     private fun stopAlwaysOnVoice() {
+        BridgePairingStore(this).voiceEnabled = false
         stopService(Intent(this, ArisAlwaysOnVoiceService::class.java))
         Toast.makeText(this, "Voice همیشه‌فعال آریس خاموش شد", Toast.LENGTH_SHORT).show()
     }
