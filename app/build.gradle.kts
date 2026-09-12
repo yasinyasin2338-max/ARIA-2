@@ -11,8 +11,8 @@ android {
         applicationId = "com.orbisai"
         minSdk = 28
         targetSdk = 35
-        versionCode = 13
-        versionName = "0.9.1"
+        versionCode = 14
+        versionName = "0.9.2"
         ndk { abiFilters.add("arm64-v8a") }
     }
     compileOptions {
