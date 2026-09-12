@@ -5,10 +5,13 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -16,6 +19,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import androidx.core.app.NotificationCompat
 import com.orbisai.MainActivity
+import com.orbisai.bridge.BridgePairingStore
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -35,12 +39,15 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+    private var persianVoiceReady = false
     private var running = false
     private var awaitingCommand = false
     private var processing = false
+    private lateinit var bridgeStore: BridgePairingStore
 
     override fun onCreate() {
         super.onCreate()
+        bridgeStore = BridgePairingStore(this)
         createChannel()
         startForeground(NOTIFICATION_ID, buildNotification("آریس آماده شنیدن نام خودش است"))
         running = true
@@ -50,9 +57,22 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
         }
         tts = TextToSpeech(this, this).also { engine ->
             engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) = Unit
-                override fun onDone(utteranceId: String?) { scheduleListen(350L) }
-                override fun onError(utteranceId: String?) { scheduleListen(500L) }
+                override fun onStart(utteranceId: String?) {
+                    sendVoiceBeacon("tts_started")
+                }
+
+                override fun onDone(utteranceId: String?) {
+                    sendVoiceBeacon("tts_done")
+                    scheduleListen(350L)
+                }
+
+                override fun onError(utteranceId: String?) {
+                    sendVoiceBeacon("tts_error")
+                    main.post {
+                        updateNotification("خروجی صوتی اجرا نشد؛ روی «تنظیم صدا» بزن")
+                    }
+                    scheduleListen(700L)
+                }
             })
         }
         scheduleListen(500L)
@@ -218,18 +238,88 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
         }.getOrNull()
     }
 
+    private fun configureTts(): Boolean {
+        val engine = tts ?: return false
+        engine.setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+        )
+        engine.setSpeechRate(0.96f)
+        engine.setPitch(1.0f)
+
+        val exact = Locale("fa", "IR")
+        var result = engine.setLanguage(exact)
+        var ok = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
+
+        val persianVoices = engine.voices
+            ?.filter { it.locale.language.equals("fa", ignoreCase = true) }
+            .orEmpty()
+        val preferred = persianVoices.firstOrNull { !it.isNetworkConnectionRequired }
+            ?: persianVoices.firstOrNull()
+        if (preferred != null) {
+            runCatching { engine.voice = preferred }
+            ok = true
+        }
+
+        if (!ok) {
+            result = engine.setLanguage(Locale("fa"))
+            ok = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
+        }
+        persianVoiceReady = ok
+        return ok
+    }
+
     private fun speak(text: String) {
         val engine = tts
         if (!ttsReady || engine == null) {
-            scheduleListen(500L)
+            updateNotification("موتور صدای گوشی آماده نیست؛ روی «تنظیم صدا» بزن")
+            sendVoiceBeacon("tts_not_ready")
+            scheduleListen(700L)
             return
         }
+
+        val audio = getSystemService(AudioManager::class.java)
+        if (audio.getStreamVolume(AudioManager.STREAM_MUSIC) <= 0) {
+            updateNotification("صدای Media روی صفر است؛ صدای گوشی را بالا ببر")
+            sendVoiceBeacon("media_volume_zero")
+            scheduleListen(900L)
+            return
+        }
+
+        configureTts()
         recognizer?.cancel()
-        engine.language = Locale("fa", "IR")
-        engine.setSpeechRate(0.96f)
-        engine.setPitch(1.0f)
-        engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "aris-${System.nanoTime()}")
-        updateNotification("آریس در حال صحبت است")
+        val params = Bundle().apply {
+            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+        }
+        val id = "aris-${System.nanoTime()}"
+        val result = engine.speak(text, TextToSpeech.QUEUE_FLUSH, params, id)
+        if (result == TextToSpeech.SUCCESS) {
+            updateNotification(if (persianVoiceReady) "آریس در حال صحبت است" else "در حال تلاش برای پخش صدا؛ بسته فارسی TTS را بررسی کن")
+            sendVoiceBeacon(if (persianVoiceReady) "tts_queued_fa" else "tts_queued_no_fa")
+        } else {
+            updateNotification("پخش صدا ناموفق بود؛ روی «تنظیم صدا» بزن")
+            sendVoiceBeacon("tts_speak_failed")
+            scheduleListen(900L)
+        }
+    }
+
+    private fun sendVoiceBeacon(detail: String) {
+        thread(name = "aris-voice-beacon", isDaemon = true) {
+            runCatching {
+                val safeDevice = bridgeStore.deviceId.replace(Regex("[^A-Za-z0-9_-]"), "_")
+                val safeDetail = detail.replace(Regex("[^A-Za-z0-9_-]"), "_")
+                val conn = (URL("$VOICE_BEACON_BASE/$safeDevice/$safeDetail").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                    setRequestProperty("User-Agent", "ARIA-AlwaysOn-Voice")
+                }
+                conn.responseCode
+                conn.disconnect()
+            }
+        }
     }
 
     private fun buildNotification(text: String): android.app.Notification {
@@ -245,6 +335,12 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
             Intent(this, ArisAlwaysOnVoiceService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val ttsSettingsIntent = PendingIntent.getActivity(
+            this,
+            2,
+            Intent(Settings.ACTION_TTS_SETTINGS),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("آریس — Voice همیشه‌فعال")
@@ -252,6 +348,7 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
             .setContentIntent(openIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .addAction(0, "تنظیم صدا", ttsSettingsIntent)
             .addAction(0, "خاموش کردن", stopIntent)
             .build()
     }
@@ -270,7 +367,13 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
 
     override fun onInit(status: Int) {
         ttsReady = status == TextToSpeech.SUCCESS
-        if (ttsReady) tts?.language = Locale("fa", "IR")
+        if (ttsReady) {
+            val ok = configureTts()
+            sendVoiceBeacon(if (ok) "tts_ready_fa" else "tts_ready_no_fa")
+        } else {
+            sendVoiceBeacon("tts_init_failed")
+            updateNotification("موتور صدای گوشی آماده نیست؛ روی «تنظیم صدا» بزن")
+        }
     }
 
     override fun onReadyForSpeech(params: Bundle?) = Unit
@@ -301,9 +404,10 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
         private const val NOTIFICATION_ID = 3100
         private const val CHANNEL_ID = "aris_always_on_voice"
         private const val CHAT_URL = "https://aria-server-new-production.up.railway.app/api/chat"
+        private const val VOICE_BEACON_BASE = "https://aria-server-new-production.up.railway.app/api/bridge/beacon/voice"
         private const val HORDE_OAI = "https://oai.aihorde.net"
         private const val HORDE_KEY = "0000000000"
-        private const val HORDE_AGENT = "ARIA-Mobile:0.8.1:https://github.com/yasinyasin2338-max/ARIA-2"
+        private const val HORDE_AGENT = "ARIA-Mobile:0.8.2:https://github.com/yasinyasin2338-max/ARIA-2"
         private val wakeWords = listOf("آریس", "اریس")
     }
 }
