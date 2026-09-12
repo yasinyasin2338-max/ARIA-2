@@ -16,6 +16,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import androidx.core.app.NotificationCompat
 import com.orbisai.MainActivity
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -27,7 +28,7 @@ import kotlin.concurrent.thread
  *
  * It keeps a visible notification while listening. It does not record or store audio.
  * Android's speech recognizer converts speech to text; only text spoken after the wake
- * phrase "آریس" is sent to the ARIA backend for a conversational response.
+ * phrase "آریس" is sent for a conversational response.
  */
 class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.OnInitListener {
     private val main = Handler(Looper.getMainLooper())
@@ -140,28 +141,81 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
         recognizer?.cancel()
         updateNotification("در حال پاسخ به: ${message.take(45)}")
         thread(name = "aris-voice-chat", isDaemon = true) {
-            val reply = runCatching {
-                val conn = (URL(CHAT_URL).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 12000
-                    readTimeout = 30000
-                    doOutput = true
-                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                    setRequestProperty("User-Agent", "ARIA-AlwaysOn-Voice")
-                }
-                val payload = JSONObject().put("message", message).toString()
-                conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
-                val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
-                val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                conn.disconnect()
-                JSONObject(body).optString("text").ifBlank { "پاسخی دریافت نشد." }
-            }.getOrElse { "الان ارتباط با آریا برقرار نشد. چند لحظه دیگه دوباره صدام کن." }
+            val reply = requestPrimaryBackend(message)
+                ?: requestHordeFallback(message)
+                ?: "الان سرویس پاسخ‌گویی در دسترس نیست. چند لحظه دیگه دوباره صدام کن."
 
             main.post {
                 processing = false
                 speak(reply.take(1200))
             }
         }
+    }
+
+    private fun requestPrimaryBackend(message: String): String? {
+        return runCatching {
+            val conn = (URL(CHAT_URL).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 12000
+                readTimeout = 30000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                setRequestProperty("User-Agent", "ARIA-AlwaysOn-Voice")
+            }
+            val payload = JSONObject().put("message", message).toString()
+            conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            conn.disconnect()
+            if (code !in 200..299) return@runCatching null
+            JSONObject(body).optString("text").trim().ifBlank { null }
+        }.getOrNull()
+    }
+
+    private fun requestHordeFallback(message: String): String? {
+        return runCatching {
+            val model = runCatching {
+                val modelsConn = (URL("$HORDE_OAI/v1/models").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 10000
+                    readTimeout = 15000
+                    setRequestProperty("apikey", HORDE_KEY)
+                    setRequestProperty("Client-Agent", HORDE_AGENT)
+                }
+                val body = modelsConn.inputStream.bufferedReader().use { it.readText() }
+                modelsConn.disconnect()
+                JSONObject(body).optJSONArray("data")?.optJSONObject(0)?.optString("id")
+            }.getOrNull().orEmpty().ifBlank { "default" }
+
+            val conn = (URL("$HORDE_OAI/v1/chat/completions").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 12000
+                readTimeout = 45000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                setRequestProperty("apikey", HORDE_KEY)
+                setRequestProperty("Client-Agent", HORDE_AGENT)
+                setRequestProperty("User-Agent", "ARIA-AlwaysOn-Voice-Fallback")
+            }
+            val messages = JSONArray()
+                .put(JSONObject().put("role", "system").put("content", "تو آریس هستی، دستیار فارسی صمیمی و کاربردی. کوتاه و روشن جواب بده."))
+                .put(JSONObject().put("role", "user").put("content", message))
+            val payload = JSONObject().put("model", model).put("messages", messages).toString()
+            conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            conn.disconnect()
+            if (code !in 200..299) return@runCatching null
+            JSONObject(body)
+                .optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?.optString("content")
+                ?.trim()
+                ?.ifBlank { null }
+        }.getOrNull()
     }
 
     private fun speak(text: String) {
@@ -247,6 +301,9 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
         private const val NOTIFICATION_ID = 3100
         private const val CHANNEL_ID = "aris_always_on_voice"
         private const val CHAT_URL = "https://aria-server-new-production.up.railway.app/api/chat"
+        private const val HORDE_OAI = "https://oai.aihorde.net"
+        private const val HORDE_KEY = "0000000000"
+        private const val HORDE_AGENT = "ARIA-Mobile:0.8.1:https://github.com/yasinyasin2338-max/ARIA-2"
         private val wakeWords = listOf("آریس", "اریس")
     }
 }
