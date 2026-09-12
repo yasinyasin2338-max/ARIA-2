@@ -11,7 +11,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -27,13 +26,6 @@ import java.net.URL
 import java.util.Locale
 import kotlin.concurrent.thread
 
-/**
- * User-started foreground voice assistant.
- *
- * It keeps a visible notification while listening. It does not record or store audio.
- * Android's speech recognizer converts speech to text; only text spoken after the wake
- * phrase "آریس" is sent for a conversational response.
- */
 class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.OnInitListener {
     private val main = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
@@ -55,22 +47,17 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
         if (SpeechRecognizer.isRecognitionAvailable(this)) {
             recognizer = SpeechRecognizer.createSpeechRecognizer(this).also { it.setRecognitionListener(this) }
         }
+
         tts = TextToSpeech(this, this).also { engine ->
             engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {
-                    sendVoiceBeacon("tts_started")
-                }
-
+                override fun onStart(utteranceId: String?) { sendVoiceBeacon("tts_started") }
                 override fun onDone(utteranceId: String?) {
                     sendVoiceBeacon("tts_done")
                     scheduleListen(350L)
                 }
-
                 override fun onError(utteranceId: String?) {
                     sendVoiceBeacon("tts_error")
-                    main.post {
-                        updateNotification("خروجی صوتی اجرا نشد؛ روی «تنظیم صدا» بزن")
-                    }
+                    main.post { updateNotification("خروجی صوتی اجرا نشد؛ روی «تنظیم صدا» بزن") }
                     scheduleListen(700L)
                 }
             })
@@ -101,6 +88,10 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private fun scheduleListen(delayMs: Long) {
+        main.postDelayed({ startListening() }, delayMs)
+    }
+
     private fun startListening() {
         if (!running || processing) return
         val r = recognizer ?: return
@@ -121,16 +112,9 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
         }.onFailure { scheduleListen(1200L) }
     }
 
-    private fun scheduleListen(delayMs: Long) {
-        main.postDelayed({ startListening() }, delayMs)
-    }
-
     private fun handleTranscript(raw: String) {
         val text = PersianVoiceProfile.normalize(raw).trim()
-        if (text.isBlank()) {
-            scheduleListen(400L)
-            return
-        }
+        if (text.isBlank()) return scheduleListen(400L)
 
         if (awaitingCommand) {
             awaitingCommand = false
@@ -138,19 +122,15 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
             return
         }
 
-        val wakeIndex = wakeWords.firstNotNullOfOrNull { w ->
-            text.indexOf(w).takeIf { it >= 0 }?.let { it to w }
+        val match = wakeWords.firstNotNullOfOrNull { wake ->
+            text.indexOf(wake).takeIf { it >= 0 }?.let { it to wake }
         }
-        if (wakeIndex == null) {
-            scheduleListen(250L)
-            return
-        }
+        if (match == null) return scheduleListen(250L)
 
-        val (index, wake) = wakeIndex
+        val (index, wake) = match
         val command = (text.substring(0, index) + " " + text.substring(index + wake.length)).trim()
-        if (command.isNotBlank()) {
-            askAria(command)
-        } else {
+        if (command.isNotBlank()) askAria(command)
+        else {
             awaitingCommand = true
             speak("بله، گوش می‌دم.")
         }
@@ -164,7 +144,6 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
             val reply = requestPrimaryBackend(message)
                 ?: requestHordeFallback(message)
                 ?: "الان سرویس پاسخ‌گویی در دسترس نیست. چند لحظه دیگه دوباره صدام کن."
-
             main.post {
                 processing = false
                 speak(reply.take(1200))
@@ -172,71 +151,62 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
         }
     }
 
-    private fun requestPrimaryBackend(message: String): String? {
-        return runCatching {
-            val conn = (URL(CHAT_URL).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 12000
-                readTimeout = 30000
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                setRequestProperty("User-Agent", "ARIA-AlwaysOn-Voice")
-            }
-            val payload = JSONObject().put("message", message).toString()
-            conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            conn.disconnect()
-            if (code !in 200..299) return@runCatching null
-            JSONObject(body).optString("text").trim().ifBlank { null }
-        }.getOrNull()
-    }
+    private fun requestPrimaryBackend(message: String): String? = runCatching {
+        val conn = (URL(CHAT_URL).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 12000
+            readTimeout = 30000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            setRequestProperty("User-Agent", "ARIA-AlwaysOn-Voice")
+        }
+        conn.outputStream.use {
+            it.write(JSONObject().put("message", message).toString().toByteArray(Charsets.UTF_8))
+        }
+        val code = conn.responseCode
+        val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
+            ?.bufferedReader()?.use { it.readText() }.orEmpty()
+        conn.disconnect()
+        if (code !in 200..299) null else JSONObject(body).optString("text").trim().ifBlank { null }
+    }.getOrNull()
 
-    private fun requestHordeFallback(message: String): String? {
-        return runCatching {
-            val model = runCatching {
-                val modelsConn = (URL("$HORDE_OAI/v1/models").openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 10000
-                    readTimeout = 15000
-                    setRequestProperty("apikey", HORDE_KEY)
-                    setRequestProperty("Client-Agent", HORDE_AGENT)
-                }
-                val body = modelsConn.inputStream.bufferedReader().use { it.readText() }
-                modelsConn.disconnect()
-                JSONObject(body).optJSONArray("data")?.optJSONObject(0)?.optString("id")
-            }.getOrNull().orEmpty().ifBlank { "default" }
+    private fun requestHordeFallback(message: String): String? = runCatching {
+        val modelsConn = (URL("$HORDE_OAI/v1/models").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10000
+            readTimeout = 15000
+            setRequestProperty("apikey", HORDE_KEY)
+            setRequestProperty("Client-Agent", HORDE_AGENT)
+        }
+        val modelsBody = modelsConn.inputStream.bufferedReader().use { it.readText() }
+        modelsConn.disconnect()
+        val model = JSONObject(modelsBody).optJSONArray("data")?.optJSONObject(0)?.optString("id")
+            .orEmpty().ifBlank { "default" }
 
-            val conn = (URL("$HORDE_OAI/v1/chat/completions").openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 12000
-                readTimeout = 45000
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                setRequestProperty("apikey", HORDE_KEY)
-                setRequestProperty("Client-Agent", HORDE_AGENT)
-                setRequestProperty("User-Agent", "ARIA-AlwaysOn-Voice-Fallback")
-            }
-            val messages = JSONArray()
-                .put(JSONObject().put("role", "system").put("content", "تو آریس هستی، دستیار فارسی صمیمی و کاربردی. کوتاه و روشن جواب بده."))
-                .put(JSONObject().put("role", "user").put("content", message))
-            val payload = JSONObject().put("model", model).put("messages", messages).toString()
-            conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            conn.disconnect()
-            if (code !in 200..299) return@runCatching null
-            JSONObject(body)
-                .optJSONArray("choices")
-                ?.optJSONObject(0)
-                ?.optJSONObject("message")
-                ?.optString("content")
-                ?.trim()
-                ?.ifBlank { null }
-        }.getOrNull()
-    }
+        val messages = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", "تو آریس هستی، دستیار فارسی صمیمی و کاربردی. کوتاه و روشن جواب بده."))
+            .put(JSONObject().put("role", "user").put("content", message))
+
+        val conn = (URL("$HORDE_OAI/v1/chat/completions").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 12000
+            readTimeout = 45000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            setRequestProperty("apikey", HORDE_KEY)
+            setRequestProperty("Client-Agent", HORDE_AGENT)
+            setRequestProperty("User-Agent", "ARIA-AlwaysOn-Voice-Fallback")
+        }
+        val payload = JSONObject().put("model", model).put("messages", messages).toString()
+        conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+        val code = conn.responseCode
+        val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
+            ?.bufferedReader()?.use { it.readText() }.orEmpty()
+        conn.disconnect()
+        if (code !in 200..299) null else JSONObject(body)
+            .optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+            ?.optString("content")?.trim()?.ifBlank { null }
+    }.getOrNull()
 
     private fun configureTts(): Boolean {
         val engine = tts ?: return false
@@ -249,20 +219,14 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
         engine.setSpeechRate(0.96f)
         engine.setPitch(1.0f)
 
-        val exact = Locale("fa", "IR")
-        var result = engine.setLanguage(exact)
+        var result = engine.setLanguage(Locale("fa", "IR"))
         var ok = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
-
-        val persianVoices = engine.voices
-            ?.filter { it.locale.language.equals("fa", ignoreCase = true) }
-            .orEmpty()
-        val preferred = persianVoices.firstOrNull { !it.isNetworkConnectionRequired }
-            ?: persianVoices.firstOrNull()
+        val persianVoices = engine.voices?.filter { it.locale.language.equals("fa", true) }.orEmpty()
+        val preferred = persianVoices.firstOrNull { !it.isNetworkConnectionRequired } ?: persianVoices.firstOrNull()
         if (preferred != null) {
             runCatching { engine.voice = preferred }
             ok = true
         }
-
         if (!ok) {
             result = engine.setLanguage(Locale("fa"))
             ok = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
@@ -276,27 +240,22 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
         if (!ttsReady || engine == null) {
             updateNotification("موتور صدای گوشی آماده نیست؛ روی «تنظیم صدا» بزن")
             sendVoiceBeacon("tts_not_ready")
-            scheduleListen(700L)
-            return
+            return scheduleListen(700L)
         }
 
         val audio = getSystemService(AudioManager::class.java)
         if (audio.getStreamVolume(AudioManager.STREAM_MUSIC) <= 0) {
             updateNotification("صدای Media روی صفر است؛ صدای گوشی را بالا ببر")
             sendVoiceBeacon("media_volume_zero")
-            scheduleListen(900L)
-            return
+            return scheduleListen(900L)
         }
 
         configureTts()
         recognizer?.cancel()
-        val params = Bundle().apply {
-            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
-        }
-        val id = "aris-${System.nanoTime()}"
-        val result = engine.speak(text, TextToSpeech.QUEUE_FLUSH, params, id)
+        val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f) }
+        val result = engine.speak(text, TextToSpeech.QUEUE_FLUSH, params, "aris-${System.nanoTime()}")
         if (result == TextToSpeech.SUCCESS) {
-            updateNotification(if (persianVoiceReady) "آریس در حال صحبت است" else "در حال تلاش برای پخش صدا؛ بسته فارسی TTS را بررسی کن")
+            updateNotification(if (persianVoiceReady) "آریس در حال صحبت است" else "بسته فارسی صدا پیدا نشد؛ «تنظیم صدا» را بررسی کن")
             sendVoiceBeacon(if (persianVoiceReady) "tts_queued_fa" else "tts_queued_no_fa")
         } else {
             updateNotification("پخش صدا ناموفق بود؛ روی «تنظیم صدا» بزن")
@@ -308,9 +267,9 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
     private fun sendVoiceBeacon(detail: String) {
         thread(name = "aris-voice-beacon", isDaemon = true) {
             runCatching {
-                val safeDevice = bridgeStore.deviceId.replace(Regex("[^A-Za-z0-9_-]"), "_")
-                val safeDetail = detail.replace(Regex("[^A-Za-z0-9_-]"), "_")
-                val conn = (URL("$VOICE_BEACON_BASE/$safeDevice/$safeDetail").openConnection() as HttpURLConnection).apply {
+                val device = bridgeStore.deviceId.replace(Regex("[^A-Za-z0-9_-]"), "_")
+                val safe = detail.replace(Regex("[^A-Za-z0-9_-]"), "_")
+                val conn = (URL("$VOICE_BEACON_BASE/$device/$safe").openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
                     connectTimeout = 5000
                     readTimeout = 5000
@@ -324,21 +283,15 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
 
     private fun buildNotification(text: String): android.app.Notification {
         val openIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
+            this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val stopIntent = PendingIntent.getService(
-            this,
-            1,
-            Intent(this, ArisAlwaysOnVoiceService::class.java).setAction(ACTION_STOP),
+            this, 1, Intent(this, ArisAlwaysOnVoiceService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val ttsSettingsIntent = PendingIntent.getActivity(
-            this,
-            2,
-            Intent(Settings.ACTION_TTS_SETTINGS),
+            this, 2, Intent("com.android.settings.TTS_SETTINGS"),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -359,9 +312,7 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
 
     private fun createChannel() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "آریس Voice همیشه‌فعال", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "وضعیت شنیدن نام آریس در پس‌زمینه"
-            }
+            NotificationChannel(CHANNEL_ID, "آریس Voice همیشه‌فعال", NotificationManager.IMPORTANCE_LOW)
         )
     }
 
