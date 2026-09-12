@@ -11,7 +11,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.concurrent.thread
 
-/** Plays high-quality Persian neural speech returned by the ARIA backend. */
+/** Plays high-quality Persian speech returned by the ARIA backend. */
 class NeuralTtsPlayer(context: Context) : AutoCloseable {
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
@@ -26,20 +26,22 @@ class NeuralTtsPlayer(context: Context) : AutoCloseable {
         onDone: () -> Unit,
         onError: () -> Unit
     ) {
-        val clean = text.trim().take(2200)
+        val clean = text.trim().take(1800)
         if (clean.isBlank() || closed) return onError()
         val serial = System.nanoTime().also { requestSerial = it }
         stopPlayerOnly()
 
         thread(name = "aria-neural-tts", isDaemon = true) {
-            val bytes = fetchAudio(clean)
-            if (closed || serial != requestSerial || bytes == null || bytes.size < 256) {
+            val payload = fetchAudio(clean)
+            if (closed || serial != requestSerial || payload == null || payload.bytes.size < 256) {
                 main.post { if (!closed && serial == requestSerial) onError() }
                 return@thread
             }
 
             val file = runCatching {
-                File.createTempFile("aria-neural-", ".mp3", appContext.cacheDir).apply { writeBytes(bytes) }
+                File.createTempFile("aria-neural-", payload.extension, appContext.cacheDir).apply {
+                    writeBytes(payload.bytes)
+                }
             }.getOrNull()
             if (file == null) {
                 main.post { if (!closed && serial == requestSerial) onError() }
@@ -86,22 +88,20 @@ class NeuralTtsPlayer(context: Context) : AutoCloseable {
         }
     }
 
-    private fun fetchAudio(text: String): ByteArray? = runCatching {
+    private fun fetchAudio(text: String): AudioPayload? = runCatching {
         val conn = (URL(TTS_URL).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 12_000
-            readTimeout = 35_000
+            connectTimeout = 15_000
+            readTimeout = 95_000
             doOutput = true
             useCaches = false
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            setRequestProperty("Accept", "audio/mpeg")
-            setRequestProperty("User-Agent", "ARIA-Android-Neural-TTS/0.9")
+            setRequestProperty("Accept", "audio/*")
+            setRequestProperty("User-Agent", "ARIA-Android-Neural-TTS/0.9.1")
         }
         val body = JSONObject()
             .put("text", text)
             .put("voice", "male")
-            .put("rate", "-4%")
-            .put("pitch", "-1Hz")
             .toString()
         conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
         val code = conn.responseCode
@@ -110,7 +110,8 @@ class NeuralTtsPlayer(context: Context) : AutoCloseable {
             conn.inputStream.use { it.readBytes() }
         } else null
         conn.disconnect()
-        data
+        if (data == null) null
+        else AudioPayload(data, if (contentType.contains("wav")) ".wav" else ".mp3")
     }.getOrNull()
 
     fun stop() {
@@ -137,6 +138,8 @@ class NeuralTtsPlayer(context: Context) : AutoCloseable {
         requestSerial = System.nanoTime()
         main.post { cleanupPlayer() }
     }
+
+    private data class AudioPayload(val bytes: ByteArray, val extension: String)
 
     companion object {
         private const val TTS_URL = "https://aria-server-new-production.up.railway.app/api/tts"
