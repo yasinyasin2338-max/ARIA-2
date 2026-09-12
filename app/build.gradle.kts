@@ -11,8 +11,8 @@ android {
         applicationId = "com.orbisai"
         minSdk = 28
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.5.0"
         ndk { abiFilters.add("arm64-v8a") }
     }
     compileOptions {
@@ -37,5 +37,10 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.animation:animation")
+
+    // Official Shizuku API. Permission is always granted explicitly by the device owner.
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
