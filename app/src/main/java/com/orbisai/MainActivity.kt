@@ -31,6 +31,7 @@ import com.orbisai.bridge.AriaAccessibilityService
 import com.orbisai.bridge.BridgeCommandService
 import com.orbisai.bridge.BridgePairingStore
 import com.orbisai.ui.OrbisApp
+import com.orbisai.voice.ArisAlwaysOnVoiceService
 import rikka.shizuku.Shizuku
 
 class MainActivity : ComponentActivity() {
@@ -42,6 +43,14 @@ class MainActivity : ComponentActivity() {
     private val notificationRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startRemoteBridgeNow()
         else Toast.makeText(this, "برای نمایش وضعیت ARIA Bridge اجازه اعلان لازم است", Toast.LENGTH_LONG).show()
+    }
+    private val alwaysVoiceMicRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startAlwaysOnVoiceAfterMic()
+        else Toast.makeText(this, "برای صدای همیشه‌فعال آریس، اجازه میکروفون لازم است", Toast.LENGTH_LONG).show()
+    }
+    private val alwaysVoiceNotificationRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startAlwaysOnVoiceNow()
+        else Toast.makeText(this, "برای نمایش وضعیت Voice همیشه‌فعال، اجازه اعلان لازم است", Toast.LENGTH_LONG).show()
     }
 
     private var shizukuRunning by mutableStateOf(false)
@@ -126,6 +135,14 @@ class MainActivity : ComponentActivity() {
                             TextButton(onClick = { stopRemoteBridge() }) {
                                 Text("خاموش کردن اتصال مستقیم")
                             }
+
+                            Button(onClick = { startAlwaysOnVoice() }) {
+                                Text("فعال کردن «آریس» همیشه‌شنوا")
+                            }
+                            TextButton(onClick = { stopAlwaysOnVoice() }) {
+                                Text("خاموش کردن Voice همیشه‌فعال")
+                            }
+                            Text("وقتی Voice همیشه‌فعال روشن باشد، یک اعلان دائمی می‌بینی. بگو «آریس» و بعد دستورت را بگو؛ صدا ذخیره نمی‌شود و متن فرمان برای پاسخ به ARIA ارسال می‌شود.")
 
                             Text("تست کنترل‌های محلی Accessibility")
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -230,6 +247,32 @@ class MainActivity : ComponentActivity() {
     private fun stopRemoteBridge() {
         stopService(Intent(this, BridgeCommandService::class.java))
         Toast.makeText(this, "اتصال مستقیم ARIA خاموش شد", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun startAlwaysOnVoice() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            alwaysVoiceMicRequest.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        startAlwaysOnVoiceAfterMic()
+    }
+
+    private fun startAlwaysOnVoiceAfterMic() {
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            alwaysVoiceNotificationRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        startAlwaysOnVoiceNow()
+    }
+
+    private fun startAlwaysOnVoiceNow() {
+        ContextCompat.startForegroundService(this, Intent(this, ArisAlwaysOnVoiceService::class.java))
+        Toast.makeText(this, "Voice همیشه‌فعال آریس روشن شد؛ بگو «آریس»", Toast.LENGTH_LONG).show()
+    }
+
+    private fun stopAlwaysOnVoice() {
+        stopService(Intent(this, ArisAlwaysOnVoiceService::class.java))
+        Toast.makeText(this, "Voice همیشه‌فعال آریس خاموش شد", Toast.LENGTH_SHORT).show()
     }
 
     private fun runLocalAccessibilityAction(action: String) {
