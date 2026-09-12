@@ -4,17 +4,41 @@ import android.accessibilityservice.AccessibilityService
 import android.view.accessibility.AccessibilityEvent
 
 /**
- * Transparent Android accessibility bridge foundation.
+ * Transparent Android accessibility bridge.
  *
- * This service does not perform remote actions on its own. Android requires the
- * device owner to enable it explicitly in Accessibility settings.
+ * It never performs actions on its own. Remote requests must be authenticated
+ * and the device owner must explicitly approve each request from a notification.
  */
 class AriaAccessibilityService : AccessibilityService() {
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Foundation only: no hidden collection or automatic actions.
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        instance = this
     }
 
-    override fun onInterrupt() {
-        // No-op.
+    override fun onDestroy() {
+        if (instance === this) instance = null
+        super.onDestroy()
+    }
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // No screen scraping or hidden collection.
+    }
+
+    override fun onInterrupt() = Unit
+
+    companion object {
+        @Volatile private var instance: AriaAccessibilityService? = null
+
+        fun performApprovedAction(action: String): Boolean {
+            val service = instance ?: return false
+            val globalAction = when (action.uppercase()) {
+                "HOME" -> GLOBAL_ACTION_HOME
+                "BACK" -> GLOBAL_ACTION_BACK
+                "RECENTS" -> GLOBAL_ACTION_RECENTS
+                "NOTIFICATIONS" -> GLOBAL_ACTION_NOTIFICATIONS
+                else -> return false
+            }
+            return service.performGlobalAction(globalAction)
+        }
     }
 }
