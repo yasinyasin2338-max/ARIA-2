@@ -3,6 +3,7 @@ package com.orbisai
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
@@ -27,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.orbisai.bridge.AriaAccessibilityService
+import com.orbisai.bridge.BridgeCommandService
+import com.orbisai.bridge.BridgePairingStore
 import com.orbisai.ui.OrbisApp
 import rikka.shizuku.Shizuku
 
@@ -36,6 +39,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private val micRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val notificationRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startRemoteBridgeNow()
+        else Toast.makeText(this, "برای نمایش وضعیت ARIA Bridge اجازه اعلان لازم است", Toast.LENGTH_LONG).show()
+    }
 
     private var shizukuRunning by mutableStateOf(false)
     private var shizukuGranted by mutableStateOf(false)
@@ -77,6 +84,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             var showBridge by remember { mutableStateOf(false) }
+            val bridgeStore = remember { BridgePairingStore(this@MainActivity) }
+
             Box {
                 OrbisApp(onRequestMicrophone = { requestMicrophone() })
                 Button(
@@ -108,6 +117,16 @@ class MainActivity : ComponentActivity() {
                                 Text(if (shizukuGranted) "Shizuku متصل است" else "اجازه Shizuku به ARIA")
                             }
 
+                            Text("شناسه امن این نصب: ${bridgeStore.deviceId}")
+                            Text("وضعیت کانال: ${bridgeStore.lastStatus}")
+
+                            Button(onClick = { startRemoteBridge() }) {
+                                Text("روشن کردن اتصال مستقیم آریس")
+                            }
+                            TextButton(onClick = { stopRemoteBridge() }) {
+                                Text("خاموش کردن اتصال مستقیم")
+                            }
+
                             Text("تست کنترل‌های محلی Accessibility")
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { runLocalAccessibilityAction("BACK") }) { Text("Back") }
@@ -130,7 +149,7 @@ class MainActivity : ComponentActivity() {
                                 Text("Notification Access")
                             }
 
-                            Text("این کنترل‌ها فقط روی خود گوشی و با مجوزهایی که خودت فعال کرده‌ای اجرا می‌شوند. اتصال مستقیم از ChatGPT هنوز جداگانه نیاز به Connector پشتیبانی‌شده دارد.")
+                            Text("اتصال مستقیم فقط وقتی این گزینه را خودت روشن کنی فعال می‌شود. فرمان‌های راه دور فعلاً محدود به Home، Back، Recents و Notifications هستند؛ هیچ Shell، رمز، محتوای صفحه یا داده بانکی از راه دور خوانده نمی‌شود.")
                         }
                     },
                     confirmButton = {
@@ -193,6 +212,24 @@ class MainActivity : ComponentActivity() {
             .onFailure {
                 Toast.makeText(this, "درخواست مجوز Shizuku اجرا نشد", Toast.LENGTH_SHORT).show()
             }
+    }
+
+    private fun startRemoteBridge() {
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notificationRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        startRemoteBridgeNow()
+    }
+
+    private fun startRemoteBridgeNow() {
+        ContextCompat.startForegroundService(this, Intent(this, BridgeCommandService::class.java))
+        Toast.makeText(this, "اتصال مستقیم ARIA روشن شد", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun stopRemoteBridge() {
+        stopService(Intent(this, BridgeCommandService::class.java))
+        Toast.makeText(this, "اتصال مستقیم ARIA خاموش شد", Toast.LENGTH_SHORT).show()
     }
 
     private fun runLocalAccessibilityAction(action: String) {
