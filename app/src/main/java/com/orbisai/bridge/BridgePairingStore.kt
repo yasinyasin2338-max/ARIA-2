@@ -19,6 +19,14 @@ class BridgePairingStore(context: Context) {
             prefs.edit().putString("pairing_secret", it).apply()
         }
 
+    var bridgeEnabled: Boolean
+        get() = prefs.getBoolean("bridge_enabled", false)
+        set(value) { prefs.edit().putBoolean("bridge_enabled", value).apply() }
+
+    var voiceEnabled: Boolean
+        get() = prefs.getBoolean("voice_enabled", false)
+        set(value) { prefs.edit().putBoolean("voice_enabled", value).apply() }
+
     var lastCommentId: Long
         get() = prefs.getLong("last_comment_id", 0L)
         set(value) { prefs.edit().putLong("last_comment_id", value).apply() }
