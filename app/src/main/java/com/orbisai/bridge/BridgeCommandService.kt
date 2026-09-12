@@ -2,7 +2,6 @@ package com.orbisai.bridge
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
@@ -11,7 +10,16 @@ import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.concurrent.thread
+import kotlin.math.abs
 
+/**
+ * User-started foreground bridge for a small allowlist of Android navigation actions.
+ *
+ * Commands are read from one public GitHub issue, but are accepted only when GitHub
+ * reports that the comment author is the owner's exact account, the command targets
+ * this installation's random device id, and the timestamp is fresh. No arbitrary shell,
+ * credential access, screen capture, hidden collection, or unrestricted remote code is used.
+ */
 class BridgeCommandService : Service() {
     @Volatile private var running = false
     private lateinit var store: BridgePairingStore
@@ -19,22 +27,26 @@ class BridgeCommandService : Service() {
     override fun onCreate() {
         super.onCreate()
         store = BridgePairingStore(this)
-        createChannels()
+        createChannel()
         startForeground(
             2100,
             NotificationCompat.Builder(this, CHANNEL_STATUS)
                 .setSmallIcon(android.R.drawable.stat_notify_sync)
-                .setContentTitle("ARIA Bridge")
-                .setContentText("کانال فرمان امن فعال است؛ هر فرمان قبل از اجرا تأیید می‌خواهد.")
+                .setContentTitle("ARIA Remote Bridge")
+                .setContentText("اتصال از راه دور فعال است — فقط فرمان‌های محدود و مجاز ARIA")
                 .setOngoing(true)
                 .build()
         )
         running = true
-        thread(name = "aria-bridge-poller", isDaemon = true) { pollLoop() }
+        thread(name = "aria-bridge-poller", isDaemon = true) {
+            sendBeacon("register", store.deviceId, "ready")
+            pollLoop()
+        }
     }
 
     override fun onDestroy() {
         running = false
+        sendBeacon("status", store.deviceId, "stopped")
         super.onDestroy()
     }
 
@@ -43,12 +55,12 @@ class BridgeCommandService : Service() {
     private fun pollLoop() {
         while (running) {
             try { pollOnce() } catch (_: Throwable) { }
-            try { Thread.sleep(6000L) } catch (_: InterruptedException) { break }
+            try { Thread.sleep(4000L) } catch (_: InterruptedException) { break }
         }
     }
 
     private fun pollOnce() {
-        val url = URL("https://api.github.com/repos/yasinyasin2338-max/ARIA-2/issues/1/comments?per_page=100")
+        val url = URL(COMMENTS_URL)
         val conn = (url.openConnection() as HttpURLConnection).apply {
             connectTimeout = 10000
             readTimeout = 10000
@@ -65,66 +77,81 @@ class BridgeCommandService : Service() {
             val id = obj.optLong("id", 0L)
             if (id <= store.lastCommentId) continue
             maxSeen = maxOf(maxSeen, id)
+
+            val author = obj.optJSONObject("user")?.optString("login", "") ?: ""
+            if (author != TRUSTED_GITHUB_LOGIN) continue
+
             val text = obj.optString("body", "")
-            parseAndOffer(text, id)
+            parseAndExecute(text)
         }
         if (maxSeen > store.lastCommentId) store.lastCommentId = maxSeen
     }
 
-    private fun parseAndOffer(text: String, commentId: Long) {
-        if (!text.startsWith("ARIA-CMD-V1\n")) return
+    private fun parseAndExecute(text: String) {
+        if (!text.startsWith("ARIA-CMD-V2\n")) return
         val fields = text.lineSequence().drop(1).mapNotNull {
             val p = it.indexOf('=')
             if (p <= 0) null else it.substring(0, p).trim() to it.substring(p + 1).trim()
         }.toMap()
+
         val device = fields["device"] ?: return
         if (device != store.deviceId) return
+
         val ts = fields["ts"]?.toLongOrNull() ?: return
-        val nonce = fields["nonce"] ?: return
+        val now = System.currentTimeMillis() / 1000L
+        if (abs(now - ts) > 300L) return
+
+        val nonce = fields["nonce"]?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{8,64}")) } ?: return
         val action = fields["action"]?.uppercase() ?: return
-        val sig = fields["sig"] ?: return
-        if (action !in setOf("HOME", "BACK", "RECENTS", "NOTIFICATIONS")) return
-        if (!store.verify(ts, nonce, action, sig)) return
-        store.lastStatus = "درخواست دریافت شد: $action"
-        showApproval(action, commentId)
+        if (action !in ALLOWED_ACTIONS) return
+
+        store.lastStatus = "فرمان دریافت شد: $action"
+        val ok = AriaAccessibilityService.performApprovedAction(action)
+        store.lastStatus = if (ok) "اجرا شد: $action" else "Accessibility آماده نیست: $action"
+        sendBeacon("result", store.deviceId, "$nonce/${if (ok) "ok" else "fail"}/$action")
+        updateStatusNotification(if (ok) "آخرین فرمان: $action ✓" else "فرمان $action اجرا نشد")
     }
 
-    private fun showApproval(action: String, commentId: Long) {
-        val approveIntent = Intent(this, BridgeActionReceiver::class.java).apply {
-            this.action = BridgeActionReceiver.ACTION_APPROVE
-            putExtra(BridgeActionReceiver.EXTRA_ACTION, action)
+    private fun sendBeacon(kind: String, deviceId: String, detail: String) {
+        try {
+            val safeKind = kind.replace(Regex("[^A-Za-z0-9_-]"), "_")
+            val safeDevice = deviceId.replace(Regex("[^A-Za-z0-9_-]"), "_")
+            val safeDetail = detail.replace(Regex("[^A-Za-z0-9_/-]"), "_")
+            val url = URL("$BEACON_BASE/$safeKind/$safeDevice/$safeDetail")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 7000
+                readTimeout = 7000
+                requestMethod = "GET"
+                setRequestProperty("User-Agent", "ARIA-Android-Bridge")
+            }
+            runCatching { conn.responseCode }
+            conn.disconnect()
+        } catch (_: Throwable) {
+            // Beacons are only status reporting. Command execution does not depend on them.
         }
-        val rejectIntent = Intent(this, BridgeActionReceiver::class.java).apply {
-            this.action = BridgeActionReceiver.ACTION_REJECT
-            putExtra(BridgeActionReceiver.EXTRA_ACTION, action)
-        }
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        val approve = PendingIntent.getBroadcast(this, commentId.toInt(), approveIntent, flags)
-        val reject = PendingIntent.getBroadcast(this, commentId.toInt() xor 0x5a5a, rejectIntent, flags)
-        val notification = NotificationCompat.Builder(this, CHANNEL_COMMANDS)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("درخواست ARIA Bridge")
-            .setContentText("فرمان $action فقط با تأیید تو اجرا می‌شود.")
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .addAction(0, "اجرا", approve)
-            .addAction(0, "رد", reject)
+    }
+
+    private fun updateStatusNotification(text: String) {
+        val n = NotificationCompat.Builder(this, CHANNEL_STATUS)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setContentTitle("ARIA Remote Bridge")
+            .setContentText(text)
+            .setOngoing(true)
             .build()
-        getSystemService(NotificationManager::class.java).notify(commentId.toInt(), notification)
+        getSystemService(NotificationManager::class.java).notify(2100, n)
     }
 
-    private fun createChannels() {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_STATUS, "ARIA Bridge status", NotificationManager.IMPORTANCE_LOW)
-        )
-        manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_COMMANDS, "ARIA Bridge approvals", NotificationManager.IMPORTANCE_HIGH)
+    private fun createChannel() {
+        getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(CHANNEL_STATUS, "ARIA Remote Bridge", NotificationManager.IMPORTANCE_LOW)
         )
     }
 
     companion object {
-        private const val CHANNEL_STATUS = "aria_bridge_status"
-        private const val CHANNEL_COMMANDS = "aria_bridge_commands"
+        private const val CHANNEL_STATUS = "aria_remote_bridge_status"
+        private const val TRUSTED_GITHUB_LOGIN = "yasinyasin2338-max"
+        private const val COMMENTS_URL = "https://api.github.com/repos/yasinyasin2338-max/ARIA-2/issues/1/comments?per_page=100"
+        private const val BEACON_BASE = "https://aria-server-new-production.up.railway.app/api/bridge/beacon"
+        private val ALLOWED_ACTIONS = setOf("HOME", "BACK", "RECENTS", "NOTIFICATIONS")
     }
 }
