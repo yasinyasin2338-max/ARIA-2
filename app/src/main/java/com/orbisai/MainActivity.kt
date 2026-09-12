@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -25,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.orbisai.bridge.AriaAccessibilityService
 import com.orbisai.ui.OrbisApp
 import rikka.shizuku.Shizuku
 
@@ -106,6 +108,16 @@ class MainActivity : ComponentActivity() {
                                 Text(if (shizukuGranted) "Shizuku متصل است" else "اجازه Shizuku به ARIA")
                             }
 
+                            Text("تست کنترل‌های محلی Accessibility")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { runLocalAccessibilityAction("BACK") }) { Text("Back") }
+                                Button(onClick = { runLocalAccessibilityAction("HOME") }) { Text("Home") }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { runLocalAccessibilityAction("RECENTS") }) { Text("Recents") }
+                                Button(onClick = { runLocalAccessibilityAction("NOTIFICATIONS") }) { Text("اعلان‌ها") }
+                            }
+
                             TextButton(onClick = {
                                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                             }) {
@@ -118,7 +130,7 @@ class MainActivity : ComponentActivity() {
                                 Text("Notification Access")
                             }
 
-                            Text("هر دسترسی فقط با اجازه خودت فعال می‌شود. این نسخه هیچ مجوزی را مخفیانه فعال نمی‌کند.")
+                            Text("این کنترل‌ها فقط روی خود گوشی و با مجوزهایی که خودت فعال کرده‌ای اجرا می‌شوند. اتصال مستقیم از ChatGPT هنوز جداگانه نیاز به Connector پشتیبانی‌شده دارد.")
                         }
                     },
                     confirmButton = {
@@ -181,6 +193,15 @@ class MainActivity : ComponentActivity() {
             .onFailure {
                 Toast.makeText(this, "درخواست مجوز Shizuku اجرا نشد", Toast.LENGTH_SHORT).show()
             }
+    }
+
+    private fun runLocalAccessibilityAction(action: String) {
+        val ok = AriaAccessibilityService.performApprovedAction(action)
+        Toast.makeText(
+            this,
+            if (ok) "فرمان $action اجرا شد" else "Accessibility ARIA فعال نیست یا سرویس آماده نیست",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     private fun requestMicrophone() {
