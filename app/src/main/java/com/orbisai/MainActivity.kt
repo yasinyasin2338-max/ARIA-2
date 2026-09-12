@@ -3,7 +3,6 @@ package com.orbisai
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -12,7 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
@@ -34,11 +33,12 @@ class MainActivity : ComponentActivity() {
             var showBridge by remember { mutableStateOf(false) }
             Box {
                 OrbisApp(onRequestMicrophone = { requestMicrophone() })
-                ExtendedFloatingActionButton(
+                Button(
                     onClick = { showBridge = true },
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-                    text = { Text("ARIA Bridge") }
-                )
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
+                ) {
+                    Text("ARIA Bridge")
+                }
             }
             if (showBridge) {
                 AlertDialog(
