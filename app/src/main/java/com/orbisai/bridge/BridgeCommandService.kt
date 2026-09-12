@@ -4,9 +4,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import android.util.Base64
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -23,38 +26,66 @@ class BridgeCommandService : Service() {
     @Volatile private var running = false
     private lateinit var store: BridgePairingStore
     private var lastRegisterAt = 0L
+    private var lastHeartbeatAt = 0L
 
     override fun onCreate() {
         super.onCreate()
         store = BridgePairingStore(this)
         createChannel()
-        startForeground(2100, statusNotification("اتصال امن مستقیم در حال برقراری است…"))
+        startForegroundCompat("اتصال امن مستقیم در حال برقراری است…")
         running = true
+        sendBridgeBeacon("service_started")
         thread(name = "aria-direct-bridge", isDaemon = true) { pollLoop() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        store.bridgeEnabled = true
         running = true
+        sendBridgeBeacon(if (intent == null) "service_restarted" else "service_start_command")
         return START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        sendBridgeBeacon("task_removed_bridge_alive")
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
         running = false
-        store.lastStatus = "اتصال مستقیم خاموش شد"
+        if (store.bridgeEnabled) {
+            store.lastStatus = "اتصال مستقیم متوقف شد؛ Android باید آن را دوباره راه‌اندازی کند"
+            sendBridgeBeacon("service_destroyed_unexpected")
+        } else {
+            store.lastStatus = "اتصال مستقیم خاموش شد"
+            sendBridgeBeacon("service_stopped_by_user")
+        }
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private fun startForegroundCompat(text: String) {
+        val type = if (Build.VERSION.SDK_INT >= 34) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        } else 0
+        ServiceCompat.startForeground(this, 2100, statusNotification(text), type)
+    }
+
     private fun pollLoop() {
         while (running) {
             try {
-                if (System.currentTimeMillis() - lastRegisterAt > 60_000L) registerDevice()
+                val now = System.currentTimeMillis()
+                if (now - lastRegisterAt > 60_000L) registerDevice()
+                if (now - lastHeartbeatAt > 30_000L) {
+                    lastHeartbeatAt = now
+                    sendBridgeBeacon("heartbeat")
+                }
                 pollOnce()
             } catch (_: Throwable) {
                 updateStatus("ارتباط موقتاً قطع شد؛ تلاش دوباره…")
+                sendBridgeBeacon("poll_error")
             }
-            try { Thread.sleep(1500L) } catch (_: InterruptedException) { break }
+            try { Thread.sleep(2000L) } catch (_: InterruptedException) { break }
         }
     }
 
@@ -74,6 +105,7 @@ class BridgeCommandService : Service() {
             lastRegisterAt = System.currentTimeMillis()
             store.lastStatus = "اتصال مستقیم امن فعال است"
             updateStatus("متصل — کنترل مجاز ARIA فعال است")
+            sendBridgeBeacon("registered")
         }
         ok
     }.getOrDefault(false)
@@ -104,6 +136,7 @@ class BridgeCommandService : Service() {
         val action = cmd.optString("action").uppercase()
         if (id.isBlank() || action.isBlank()) return
         store.lastStatus = "فرمان دریافت شد: $action"
+        sendBridgeBeacon("command_${action.lowercase()}")
 
         var detail = ""
         val ok = runCatching {
@@ -137,6 +170,7 @@ class BridgeCommandService : Service() {
         postResult(id, action, ok, detail)
         store.lastStatus = if (ok) "اجرا شد: $action" else "اجرا نشد: $action"
         updateStatus(if (ok) "آخرین فرمان: $action ✓" else "آخرین فرمان: $action اجرا نشد")
+        sendBridgeBeacon(if (ok) "result_${action.lowercase()}_ok" else "result_${action.lowercase()}_failed")
     }
 
     private fun postResult(id: String, action: String, ok: Boolean, detail: String) {
@@ -158,6 +192,17 @@ class BridgeCommandService : Service() {
         }
     }
 
+    private fun sendBridgeBeacon(detail: String) {
+        thread(name = "aria-bridge-beacon", isDaemon = true) {
+            runCatching {
+                val safe = detail.replace(Regex("[^A-Za-z0-9_-]"), "_").take(180)
+                val conn = connection("$BEACON_BASE/${store.deviceId}/$safe", "GET")
+                conn.responseCode
+                conn.disconnect()
+            }
+        }
+    }
+
     private fun decodeText(encoded: String): String? = runCatching {
         val bytes = Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
         bytes.toString(Charsets.UTF_8).take(4000)
@@ -169,7 +214,7 @@ class BridgeCommandService : Service() {
             connectTimeout = 10_000
             readTimeout = 15_000
             useCaches = false
-            setRequestProperty("User-Agent", "ARIA-Android-Direct-Bridge/0.9")
+            setRequestProperty("User-Agent", "ARIA-Android-Direct-Bridge/0.9.1")
         }
 
     private fun statusNotification(text: String) = NotificationCompat.Builder(this, CHANNEL_STATUS)
@@ -193,5 +238,6 @@ class BridgeCommandService : Service() {
     companion object {
         private const val CHANNEL_STATUS = "aria_remote_bridge_status"
         private const val BASE = "https://aria-server-new-production.up.railway.app/api/bridge"
+        private const val BEACON_BASE = "https://aria-server-new-production.up.railway.app/api/bridge/beacon/bridge"
     }
 }
