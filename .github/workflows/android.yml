@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, android-bridge-v1 ]
   workflow_dispatch:
 
 jobs:
@@ -28,6 +28,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: orbis-ai-debug-apk
+          name: orbis-ai-bridge-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
