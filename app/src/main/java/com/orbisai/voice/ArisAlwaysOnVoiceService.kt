@@ -46,6 +46,7 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
         createChannel()
         startForeground(NOTIFICATION_ID, buildNotification("آریس آماده است؛ بگو «آریس»"))
         running = true
+        sendVoiceBeacon("voice_service_created")
 
         if (SpeechRecognizer.isRecognitionAvailable(this)) {
             recognizer = SpeechRecognizer.createSpeechRecognizer(this).also { it.setRecognitionListener(this) }
@@ -75,15 +76,20 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            bridgeStore.voiceEnabled = false
+            sendVoiceBeacon("voice_stopped_by_user")
             stopSelf()
             return START_NOT_STICKY
         }
+        bridgeStore.voiceEnabled = true
         running = true
+        sendVoiceBeacon(if (intent == null) "voice_service_restarted" else "voice_service_start")
         scheduleListen(250L)
         return START_STICKY
     }
 
     override fun onDestroy() {
+        sendVoiceBeacon(if (bridgeStore.voiceEnabled) "voice_service_destroyed_unexpected" else "voice_service_destroyed")
         running = false
         processing = false
         speaking = false
@@ -170,7 +176,7 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
             readTimeout = 35_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            setRequestProperty("User-Agent", "ARIA-AlwaysOn-Voice/0.9")
+            setRequestProperty("User-Agent", "ARIA-AlwaysOn-Voice/0.9.1")
         }
         conn.outputStream.use {
             it.write(JSONObject().put("message", message).toString().toByteArray(Charsets.UTF_8))
@@ -207,7 +213,7 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             setRequestProperty("apikey", HORDE_KEY)
             setRequestProperty("Client-Agent", HORDE_AGENT)
-            setRequestProperty("User-Agent", "ARIA-AlwaysOn-Voice-Fallback/0.9")
+            setRequestProperty("User-Agent", "ARIA-AlwaysOn-Voice-Fallback/0.9.1")
         }
         val payload = JSONObject().put("model", model).put("messages", messages).toString()
         conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
@@ -238,17 +244,24 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
                 scheduleListen(300L)
             },
             onError = {
-                sendVoiceBeacon("neural_tts_fallback")
-                localSpeak(text)
+                if (localPersianReady) {
+                    sendVoiceBeacon("neural_tts_fallback_fa")
+                    localSpeak(text)
+                } else {
+                    speaking = false
+                    updateNotification("صدای فارسی موقتاً در دسترس نیست")
+                    sendVoiceBeacon("neural_tts_failed_no_local_fa")
+                    scheduleListen(600L)
+                }
             }
         )
     }
 
     private fun localSpeak(text: String) {
         val engine = localTts
-        if (!localTtsReady || engine == null) {
+        if (!localTtsReady || engine == null || !localPersianReady) {
             speaking = false
-            updateNotification("خروجی صوتی در دسترس نیست")
+            updateNotification("خروجی صوتی فارسی در دسترس نیست")
             sendVoiceBeacon("tts_not_ready")
             scheduleListen(600L)
             return
@@ -269,7 +282,7 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
             sendVoiceBeacon("local_tts_speak_failed")
             scheduleListen(600L)
         } else {
-            sendVoiceBeacon(if (localPersianReady) "local_tts_queued_fa" else "local_tts_queued_fallback")
+            sendVoiceBeacon("local_tts_queued_fa")
         }
     }
 
@@ -304,7 +317,7 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
                     requestMethod = "GET"
                     connectTimeout = 5_000
                     readTimeout = 5_000
-                    setRequestProperty("User-Agent", "ARIA-AlwaysOn-Voice/0.9")
+                    setRequestProperty("User-Agent", "ARIA-AlwaysOn-Voice/0.9.1")
                 }
                 conn.responseCode
                 conn.disconnect()
@@ -382,7 +395,7 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
         private const val VOICE_BEACON_BASE = "https://aria-server-new-production.up.railway.app/api/bridge/beacon/voice"
         private const val HORDE_OAI = "https://oai.aihorde.net"
         private const val HORDE_KEY = "0000000000"
-        private const val HORDE_AGENT = "ARIA-Mobile:0.9:https://github.com/yasinyasin2338-max/ARIA-2"
+        private const val HORDE_AGENT = "ARIA-Mobile:0.9.1:https://github.com/yasinyasin2338-max/ARIA-2"
         private val wakeWords = listOf("آریس", "اریس")
     }
 }
