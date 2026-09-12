@@ -19,8 +19,11 @@ import kotlin.concurrent.thread
  * Owner-enabled foreground remote bridge.
  *
  * The phone authenticates to ARIA with a per-install random secret kept only in
- * Android private storage. No shell, root, credential reading, Secure Folder,
- * banking data, or permission bypass is exposed.
+ * Android private storage. The bridge intentionally exposes no shell/root,
+ * permission bypass, credential access, lock-screen control, Secure Folder or
+ * banking/payment access. High-impact actions such as installing/uninstalling
+ * apps, deleting files, changing device security or silently sending messages
+ * are not part of this command surface.
  */
 class BridgeCommandService : Service() {
     @Volatile private var running = false
@@ -65,9 +68,7 @@ class BridgeCommandService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun startForegroundCompat(text: String) {
-        val type = if (Build.VERSION.SDK_INT >= 34) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-        } else 0
+        val type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
         ServiceCompat.startForeground(this, 2100, statusNotification(text), type)
     }
 
@@ -104,7 +105,7 @@ class BridgeCommandService : Service() {
         if (ok) {
             lastRegisterAt = System.currentTimeMillis()
             store.lastStatus = "اتصال مستقیم امن فعال است"
-            updateStatus("متصل — کنترل مجاز ARIA فعال است")
+            updateStatus("متصل — کنترل گسترده و محافظت‌شده ARIA فعال است")
             sendBridgeBeacon("registered")
         }
         ok
@@ -114,7 +115,7 @@ class BridgeCommandService : Service() {
         val conn = connection("$BASE/v2/poll/${store.deviceId}", "GET").apply {
             setRequestProperty("Authorization", "Bearer ${store.pairingSecret}")
         }
-        when (val code = conn.responseCode) {
+        when (conn.responseCode) {
             204 -> { conn.disconnect(); return }
             401 -> {
                 conn.disconnect()
@@ -142,19 +143,30 @@ class BridgeCommandService : Service() {
         val ok = runCatching {
             when (action) {
                 "PING" -> { detail = "pong"; true }
-                "HOME", "BACK", "RECENTS", "NOTIFICATIONS" -> AriaAccessibilityService.performApprovedAction(action)
+                "HOME", "BACK", "RECENTS", "NOTIFICATIONS", "QUICK_SETTINGS" ->
+                    AriaAccessibilityService.performApprovedAction(action)
+
                 "TAP" -> AriaAccessibilityService.tap(cmd.optInt("x"), cmd.optInt("y"))
                 "SWIPE" -> AriaAccessibilityService.swipe(
                     cmd.optInt("x"), cmd.optInt("y"), cmd.optInt("x2"), cmd.optInt("y2"), cmd.optLong("duration", 450L)
                 )
                 "GET_UI" -> {
                     detail = AriaAccessibilityService.visibleUiSnapshot()
-                    !detail.startsWith("ACCESSIBILITY_NOT_READY") && !detail.startsWith("NO_ACTIVE_WINDOW")
+                    isUsefulDetail(detail)
+                }
+                "GET_FOREGROUND_APP" -> {
+                    detail = AriaAccessibilityService.foregroundAppInfo()
+                    isUsefulDetail(detail)
+                }
+                "GET_NOTIFICATIONS" -> {
+                    detail = AriaNotificationListenerService.snapshot()
+                    isUsefulDetail(detail)
                 }
                 "TYPE_TEXT" -> {
                     val text = decodeText(cmd.optString("text64")) ?: return@runCatching false
                     AriaAccessibilityService.typeText(text)
                 }
+                "CLEAR_TEXT" -> AriaAccessibilityService.clearText()
                 "CLICK_TEXT" -> {
                     val text = decodeText(cmd.optString("text64")) ?: return@runCatching false
                     AriaAccessibilityService.clickText(text)
@@ -162,16 +174,40 @@ class BridgeCommandService : Service() {
                 "SCROLL_FORWARD" -> AriaAccessibilityService.scroll(true)
                 "SCROLL_BACKWARD" -> AriaAccessibilityService.scroll(false)
                 "OPEN_APP" -> AriaAccessibilityService.openApp(cmd.optString("packageName"))
+
+                "OPEN_SETTINGS" -> AriaAccessibilityService.openSettings("GENERAL")
+                "OPEN_WIFI_SETTINGS" -> AriaAccessibilityService.openSettings("WIFI")
+                "OPEN_BLUETOOTH_SETTINGS" -> AriaAccessibilityService.openSettings("BLUETOOTH")
+                "OPEN_DISPLAY_SETTINGS" -> AriaAccessibilityService.openSettings("DISPLAY")
+                "OPEN_SOUND_SETTINGS" -> AriaAccessibilityService.openSettings("SOUND")
+                "OPEN_APPS_SETTINGS" -> AriaAccessibilityService.openSettings("APPS")
+                "OPEN_NOTIFICATION_SETTINGS" -> AriaAccessibilityService.openSettings("NOTIFICATIONS")
+
+                "VOLUME_UP" -> AriaAccessibilityService.adjustVolume("UP")
+                "VOLUME_DOWN" -> AriaAccessibilityService.adjustVolume("DOWN")
+                "VOLUME_MUTE" -> AriaAccessibilityService.adjustVolume("MUTE")
+                "VOLUME_UNMUTE" -> AriaAccessibilityService.adjustVolume("UNMUTE")
+                "MEDIA_PLAY_PAUSE" -> AriaAccessibilityService.mediaKey("PLAY_PAUSE")
+                "MEDIA_NEXT" -> AriaAccessibilityService.mediaKey("NEXT")
+                "MEDIA_PREVIOUS" -> AriaAccessibilityService.mediaKey("PREVIOUS")
+                "MEDIA_STOP" -> AriaAccessibilityService.mediaKey("STOP")
                 else -> false
             }
         }.getOrDefault(false)
 
-        if (detail.isBlank()) detail = if (ok) "ok" else "failed_or_accessibility_not_ready"
+        if (detail.isBlank()) detail = if (ok) "ok" else "failed_or_protected_or_permission_not_ready"
         postResult(id, action, ok, detail)
         store.lastStatus = if (ok) "اجرا شد: $action" else "اجرا نشد: $action"
         updateStatus(if (ok) "آخرین فرمان: $action ✓" else "آخرین فرمان: $action اجرا نشد")
         sendBridgeBeacon(if (ok) "result_${action.lowercase()}_ok" else "result_${action.lowercase()}_failed")
     }
+
+    private fun isUsefulDetail(detail: String): Boolean =
+        detail.isNotBlank() &&
+            !detail.startsWith("ACCESSIBILITY_NOT_READY") &&
+            !detail.startsWith("NOTIFICATION_ACCESS_NOT_READY") &&
+            !detail.startsWith("NO_ACTIVE_WINDOW") &&
+            !detail.startsWith("PROTECTED_")
 
     private fun postResult(id: String, action: String, ok: Boolean, detail: String) {
         runCatching {
@@ -214,7 +250,7 @@ class BridgeCommandService : Service() {
             connectTimeout = 10_000
             readTimeout = 15_000
             useCaches = false
-            setRequestProperty("User-Agent", "ARIA-Android-Direct-Bridge/0.9.1")
+            setRequestProperty("User-Agent", "ARIA-Android-Direct-Bridge/0.9.2")
         }
 
     private fun statusNotification(text: String) = NotificationCompat.Builder(this, CHANNEL_STATUS)
