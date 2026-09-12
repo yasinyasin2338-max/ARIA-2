@@ -36,10 +36,12 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
     private var awaitingCommand = false
     private var processing = false
     private lateinit var bridgeStore: BridgePairingStore
+    private lateinit var neuralTts: NeuralPersianTtsPlayer
 
     override fun onCreate() {
         super.onCreate()
         bridgeStore = BridgePairingStore(this)
+        neuralTts = NeuralPersianTtsPlayer(this)
         createChannel()
         startForeground(NOTIFICATION_ID, buildNotification("آریس آماده شنیدن نام خودش است"))
         running = true
@@ -57,7 +59,7 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
                 }
                 override fun onError(utteranceId: String?) {
                     sendVoiceBeacon("tts_error")
-                    main.post { updateNotification("خروجی صوتی اجرا نشد؛ روی «تنظیم صدا» بزن") }
+                    main.post { updateNotification("خروجی صوتی محلی اجرا نشد") }
                     scheduleListen(700L)
                 }
             })
@@ -80,6 +82,7 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
         recognizer?.cancel()
         recognizer?.destroy()
         recognizer = null
+        if (::neuralTts.isInitialized) neuralTts.close()
         tts?.stop()
         tts?.shutdown()
         tts = null
@@ -236,13 +239,6 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
     }
 
     private fun speak(text: String) {
-        val engine = tts
-        if (!ttsReady || engine == null) {
-            updateNotification("موتور صدای گوشی آماده نیست؛ روی «تنظیم صدا» بزن")
-            sendVoiceBeacon("tts_not_ready")
-            return scheduleListen(700L)
-        }
-
         val audio = getSystemService(AudioManager::class.java)
         if (audio.getStreamVolume(AudioManager.STREAM_MUSIC) <= 0) {
             updateNotification("صدای Media روی صفر است؛ صدای گوشی را بالا ببر")
@@ -250,15 +246,43 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
             return scheduleListen(900L)
         }
 
+        recognizer?.cancel()
+        updateNotification("آریس در حال آماده‌کردن صدای طبیعی است")
+        sendVoiceBeacon("neural_tts_request")
+        neuralTts.speak(
+            text = text,
+            onStarted = {
+                updateNotification("آریس در حال صحبت است")
+                sendVoiceBeacon("neural_tts_started")
+            },
+            onDone = {
+                sendVoiceBeacon("neural_tts_done")
+                scheduleListen(350L)
+            },
+            onFallback = {
+                sendVoiceBeacon("neural_tts_fallback")
+                speakLocal(text)
+            }
+        )
+    }
+
+    private fun speakLocal(text: String) {
+        val engine = tts
+        if (!ttsReady || engine == null) {
+            updateNotification("صدای Neural و موتور محلی در دسترس نیست")
+            sendVoiceBeacon("tts_not_ready")
+            return scheduleListen(700L)
+        }
+
         configureTts()
         recognizer?.cancel()
         val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f) }
         val result = engine.speak(text, TextToSpeech.QUEUE_FLUSH, params, "aris-${System.nanoTime()}")
         if (result == TextToSpeech.SUCCESS) {
-            updateNotification(if (persianVoiceReady) "آریس در حال صحبت است" else "بسته فارسی صدا پیدا نشد؛ «تنظیم صدا» را بررسی کن")
+            updateNotification("صدای پشتیبان محلی در حال پخش است")
             sendVoiceBeacon(if (persianVoiceReady) "tts_queued_fa" else "tts_queued_no_fa")
         } else {
-            updateNotification("پخش صدا ناموفق بود؛ روی «تنظیم صدا» بزن")
+            updateNotification("پخش صدا ناموفق بود")
             sendVoiceBeacon("tts_speak_failed")
             scheduleListen(900L)
         }
@@ -323,7 +347,6 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
             sendVoiceBeacon(if (ok) "tts_ready_fa" else "tts_ready_no_fa")
         } else {
             sendVoiceBeacon("tts_init_failed")
-            updateNotification("موتور صدای گوشی آماده نیست؛ روی «تنظیم صدا» بزن")
         }
     }
 
@@ -358,7 +381,7 @@ class ArisAlwaysOnVoiceService : Service(), RecognitionListener, TextToSpeech.On
         private const val VOICE_BEACON_BASE = "https://aria-server-new-production.up.railway.app/api/bridge/beacon/voice"
         private const val HORDE_OAI = "https://oai.aihorde.net"
         private const val HORDE_KEY = "0000000000"
-        private const val HORDE_AGENT = "ARIA-Mobile:0.8.2:https://github.com/yasinyasin2338-max/ARIA-2"
+        private const val HORDE_AGENT = "ARIA-Mobile:0.8.3:https://github.com/yasinyasin2338-max/ARIA-2"
         private val wakeWords = listOf("آریس", "اریس")
     }
 }
