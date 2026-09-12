@@ -167,7 +167,7 @@ class AriaAccessibilityService : AccessibilityService() {
                 "DISPLAY" -> Settings.ACTION_DISPLAY_SETTINGS
                 "SOUND" -> Settings.ACTION_SOUND_SETTINGS
                 "APPS" -> Settings.ACTION_APPLICATION_SETTINGS
-                "NOTIFICATIONS" -> Settings.ACTION_NOTIFICATION_SETTINGS
+                "NOTIFICATIONS" -> "android.settings.NOTIFICATION_SETTINGS"
                 "ACCESSIBILITY" -> Settings.ACTION_ACCESSIBILITY_SETTINGS
                 else -> return false
             }
