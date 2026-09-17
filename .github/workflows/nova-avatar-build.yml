@@ -21,7 +21,7 @@ jobs:
           gradle-version: '8.10.2'
       - name: Reconstruct and verify source archive
         run: |
-          FILES="nova-avatar-v2.b64.00 nova-avatar-v2.b64.01 nova-avatar-v2.b64.02 nova-avatar-v2.b64.03 nova-avatar-v2.b64.04 nova-avatar-v2.b64.05a nova-avatar-v2.b64.05b1 nova-avatar-v2.b64.05b2"
+          FILES="nova-avatar-v2.b64.00 nova-avatar-v2.b64.01 nova-avatar-v2.b64.02 nova-avatar-v2.b64.03 nova-avatar-v2.b64.04 nova-avatar-v2.b64.05a nova-avatar-v2.b64.05b1 nova-avatar-v2.b64.05b2.00 nova-avatar-v2.b64.05b2.01 nova-avatar-v2.b64.05b2.02 nova-avatar-v2.b64.05b2.03 nova-avatar-v2.b64.05b2.04 nova-avatar-v2.b64.05b2.05"
           for f in $FILES; do printf '%s ' "$f"; sha256sum "$f"; done
           cat $FILES | tr -d '[:space:]' > nova-avatar-source.b64
           base64 -d nova-avatar-source.b64 > nova-avatar-source.zip
