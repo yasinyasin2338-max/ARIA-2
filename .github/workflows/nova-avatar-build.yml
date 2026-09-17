@@ -19,7 +19,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
-      - name: Reconstruct and verify source archive
+      - name: Reconstruct verified 0.3.0 baseline
         run: |
           tr -d '[:space:]' < nova-avatar-v3.b64 > nova-avatar-source.b64
           base64 -d nova-avatar-source.b64 > nova-avatar-source.zip
@@ -27,6 +27,15 @@ jobs:
           rm -rf nova-avatar-build
           mkdir nova-avatar-build
           unzip -q nova-avatar-source.zip -d nova-avatar-build
+      - name: Apply committed 0.3.1 implementation patch
+        run: |
+          python3 nova-avatar-patches/step-031.py
+          grep -q 'برگرد پذیرایی' nova-avatar-build/app/src/main/java/com/arisnova/avatar/engine/CommandParser.java
+          grep -q "versionName '0.3.1-dev'" nova-avatar-build/app/build.gradle
+          cd nova-avatar-build
+          zip -qr ../nova-avatar-0.3.1-dev-source.zip app build.gradle settings.gradle gradle.properties README.md docs tools
+          cd ..
+          sha256sum nova-avatar-0.3.1-dev-source.zip | tee nova-avatar-0.3.1-dev-source.sha256
       - name: Unit and regression tests
         working-directory: nova-avatar-build
         run: gradle testDebugUnitTest --stacktrace
@@ -43,11 +52,12 @@ jobs:
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'resources.arsc'
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'res/drawable_nodpi/face_neutral.jpg'
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'res/drawable_nodpi/face_smile.jpg'
-      - name: Upload APK and exact source
+      - name: Upload APK and exact patched source
         uses: actions/upload-artifact@v4
         with:
-          name: nova-avatar-0.3.0-dev
+          name: nova-avatar-0.3.1-dev
           path: |
             nova-avatar-build/app/build/outputs/apk/debug/app-debug.apk
             nova-avatar-build/app-debug.sha256
-            nova-avatar-source.zip
+            nova-avatar-0.3.1-dev-source.zip
+            nova-avatar-0.3.1-dev-source.sha256
