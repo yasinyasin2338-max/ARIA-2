@@ -1,1 +1,1 @@
-nova-avatar-0.2.0-dev build 2026-09-17T10:39Z exact-segmented-tail
+nova-avatar-0.3.1-dev build 2026-09-17T15:00Z living-room-alias-regression
