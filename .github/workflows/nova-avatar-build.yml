@@ -1,5 +1,6 @@
 name: Build Nova Avatar APK
 
+# Clean from-scratch Android build track for the Persian text-controlled avatar app.
 on:
   push:
     branches: [ "nova-avatar-v1" ]
