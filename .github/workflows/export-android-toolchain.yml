@@ -16,15 +16,21 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Prepare minimal Android SDK bundle
+      - name: Prepare stable Android 35 SDK bundle
         shell: bash
         run: |
           set -euxo pipefail
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          echo "ANDROID_HOME=$SDK"
-          ls -la "$SDK/build-tools"
-          BT=$(ls -1 "$SDK/build-tools" | sort -V | tail -1)
-          PLATFORM=$(ls -1 "$SDK/platforms" | sort -V | tail -1)
+          PLATFORM="android-35"
+          test -f "$SDK/platforms/$PLATFORM/android.jar"
+          if [ -d "$SDK/build-tools/35.0.1" ]; then
+            BT="35.0.1"
+          elif [ -d "$SDK/build-tools/35.0.0" ]; then
+            BT="35.0.0"
+          else
+            BT=$(find "$SDK/build-tools" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | grep '^35\.' | sort -V | tail -1)
+          fi
+          test -n "$BT"
           mkdir -p android-toolchain/build-tools android-toolchain/platforms
           cp -a "$SDK/build-tools/$BT" "android-toolchain/build-tools/$BT"
           mkdir -p "android-toolchain/platforms/$PLATFORM"
@@ -35,7 +41,7 @@ jobs:
           du -h android-toolchain.tgz
       - uses: actions/upload-artifact@v4
         with:
-          name: android-toolchain-minimal
+          name: android-toolchain-stable-35
           path: |
             android-toolchain.tgz
             android-toolchain.tgz.sha256
