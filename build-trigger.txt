@@ -1,1 +1,1 @@
-nova-avatar-0.2.0-dev build 2026-09-17T10:20Z
+nova-avatar-0.2.0-dev build 2026-09-17T10:26Z complete-v2-chunks
