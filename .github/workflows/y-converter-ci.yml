@@ -33,6 +33,7 @@ jobs:
           unzip -q y-converter-source.zip -d ybuild
           test -f ybuild/Y-Converter/settings.gradle.kts
           cp y-converter-overrides/app-build.gradle.kts ybuild/Y-Converter/app/build.gradle.kts
+          cp y-converter-overrides/MainActivity.kt ybuild/Y-Converter/app/src/main/java/com/yasin/yconverter/MainActivity.kt
           grep -E 'compileSdk|targetSdk|core-ktx|activity-compose|lifecycle-|compose.ui:ui:' ybuild/Y-Converter/app/build.gradle.kts
       - name: Unit tests
         working-directory: ybuild/Y-Converter
