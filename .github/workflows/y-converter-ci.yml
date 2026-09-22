@@ -22,7 +22,7 @@ jobs:
           test -n "$SDKMANAGER"
           echo "Using $SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-37" "build-tools;36.0.0"
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
@@ -32,6 +32,9 @@ jobs:
           mkdir ybuild
           unzip -q y-converter-source.zip -d ybuild
           test -f ybuild/Y-Converter/settings.gradle.kts
+          sed -i 's/compileSdk = 37/compileSdk = 36/' ybuild/Y-Converter/app/build.gradle.kts
+          sed -i 's/targetSdk = 37/targetSdk = 36/' ybuild/Y-Converter/app/build.gradle.kts
+          grep -E 'compileSdk|targetSdk' ybuild/Y-Converter/app/build.gradle.kts
       - name: Unit tests
         working-directory: ybuild/Y-Converter
         run: gradle testDebugUnitTest --stacktrace --no-daemon
