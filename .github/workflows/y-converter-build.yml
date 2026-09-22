@@ -35,6 +35,14 @@ jobs:
           rm -rf y-converter
           mkdir y-converter
           unzip -q /tmp/y-converter.zip -d y-converter
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("y-converter/app/build.gradle.kts")
+          s = p.read_text()
+          if "compileSdkMinor" not in s:
+              s = s.replace("    compileSdk = 37\n", "    compileSdk = 37\n    compileSdkMinor = 0\n")
+          p.write_text(s)
+          PY
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -49,7 +57,7 @@ jobs:
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
           sdkmanager --version
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-37" "build-tools;37.0.0"
+          sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
 
       - name: Set up Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v4
