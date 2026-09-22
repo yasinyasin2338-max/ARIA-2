@@ -5,6 +5,8 @@ on:
     branches: [ "main" ]
     paths:
       - ".github/workflows/y-converter-build.yml"
+  issues:
+    types: [opened]
   workflow_dispatch:
 
 permissions:
@@ -12,6 +14,7 @@ permissions:
 
 jobs:
   build-y-converter:
+    if: github.event_name != 'issues' || github.event.issue.title == '[CI] Build Y Converter'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
