@@ -7,6 +7,9 @@ on:
       - ".github/workflows/y-converter-build.yml"
   issues:
     types: [opened]
+  workflow_run:
+    workflows: ["Android CI"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
