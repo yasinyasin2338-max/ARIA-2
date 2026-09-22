@@ -64,27 +64,21 @@ jobs:
         with:
           gradle-version: "9.6.0"
 
-      - name: Generate wrapper and verify toolchain
+      - name: Verify Gradle toolchain
         working-directory: y-converter
-        shell: bash
-        run: |
-          set -euo pipefail
-          gradle --version
-          gradle wrapper --gradle-version 9.6.0
-          chmod +x gradlew
-          ./gradlew --version
+        run: gradle --version
 
       - name: Unit tests
         working-directory: y-converter
-        run: ./gradlew --no-daemon --stacktrace testDebugUnitTest
+        run: gradle --no-daemon --stacktrace testDebugUnitTest
 
       - name: Lint
         working-directory: y-converter
-        run: ./gradlew --no-daemon --stacktrace lintDebug
+        run: gradle --no-daemon --stacktrace lintDebug
 
       - name: Build debug APK
         working-directory: y-converter
-        run: ./gradlew --no-daemon --stacktrace assembleDebug
+        run: gradle --no-daemon --stacktrace assembleDebug
 
       - name: Verify APK integrity
         shell: bash
