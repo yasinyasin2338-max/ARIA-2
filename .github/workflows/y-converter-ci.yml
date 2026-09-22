@@ -44,6 +44,14 @@ jobs:
       - name: Build APK
         working-directory: ybuild/Y-Converter
         run: gradle assembleDebug --stacktrace --no-daemon
+      - name: Instrumented UI tests
+        uses: ReactiveCircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: cd ybuild/Y-Converter && gradle connectedDebugAndroidTest --stacktrace --no-daemon
       - name: Verify APK
         run: |
           APK=ybuild/Y-Converter/app/build/outputs/apk/debug/app-debug.apk
