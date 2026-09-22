@@ -1,0 +1,101 @@
+name: Y Converter Build
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - ".github/workflows/y-converter-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-y-converter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout isolated Y Converter branch
+        uses: actions/checkout@v4
+        with:
+          ref: y-converter-v1-build
+
+      - name: Reconstruct and verify source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .ci/yconv.part.00 .ci/yconv.part.01 .ci/yconv.part.02 .ci/yconv.part.03 | base64 --decode > /tmp/y-converter.zip
+          echo "f6191a9f700407affa0c7a5c21bc65c9436c088bcd72325b2d3817f3bd45aaa0  /tmp/y-converter.zip" | sha256sum -c -
+          rm -rf y-converter
+          mkdir y-converter
+          unzip -q /tmp/y-converter.zip -d y-converter
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 37
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-37" "build-tools;37.0.0"
+
+      - name: Set up Gradle 9.6.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6.0"
+
+      - name: Generate wrapper and verify toolchain
+        working-directory: y-converter
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --version
+          gradle wrapper --gradle-version 9.6.0
+          chmod +x gradlew
+          ./gradlew --version
+
+      - name: Unit tests
+        working-directory: y-converter
+        run: ./gradlew --no-daemon --stacktrace testDebugUnitTest
+
+      - name: Lint
+        working-directory: y-converter
+        run: ./gradlew --no-daemon --stacktrace lintDebug
+
+      - name: Build debug APK
+        working-directory: y-converter
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Verify APK integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=y-converter/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          sha256sum "$APK"
+          unzip -t "$APK" >/dev/null
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Y-Converter-debug-apk
+          path: y-converter/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Y-Converter-reports
+          path: |
+            y-converter/app/build/reports/
+            y-converter/app/build/test-results/
+          if-no-files-found: warn
+          retention-days: 30
