@@ -43,6 +43,7 @@ jobs:
               s = s.replace("    compileSdk = 37\n", "    compileSdk = 37\n    compileSdkMinor = 0\n")
           p.write_text(s)
           PY
+          cp .ci/patches/MainActivity.kt y-converter/app/src/main/java/com/yasin/yconverter/MainActivity.kt
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
